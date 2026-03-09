@@ -18,7 +18,7 @@ RUN chmod +x /tmp/install_rocm_sdk.sh && \
   /tmp/install_rocm_sdk.sh
 
 # 4. Python Venv Setup
-RUN /usr/bin/python3.13 -m venv /opt/venv
+RUN /usr/bin/python3.12 -m venv /opt/venv
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 ENV PIP_NO_CACHE_DIR=1
@@ -70,7 +70,7 @@ RUN export HIP_DEVICE_LIB_PATH=$(find /opt/rocm -type d -name bitcode -print -qu
   echo "Compiling with Bitcode: $HIP_DEVICE_LIB_PATH" && \
   export CMAKE_ARGS="-DROCM_PATH=/opt/rocm -DHIP_PATH=/opt/rocm -DAMDGPU_TARGETS=gfx1151 -DHIP_ARCHITECTURES=gfx1151" && \   
   python -m pip wheel --no-build-isolation --no-deps -w /tmp/dist -v . && \
-  python -m pip install --no-deps /tmp/dist/*.whl
+  python -m pip install /tmp/dist/*.whl
 
 RUN python -m pip install ray
 
