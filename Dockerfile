@@ -34,6 +34,7 @@ WORKDIR /opt
 
 # Flash-Attention
 ENV FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE"
+ENV LD_LIBRARY_PATH="/opt/rocm/lib:/opt/rocm/lib64:$LD_LIBRARY_PATH"
 
 RUN git clone https://github.com/ROCm/flash-attention.git &&\ 
   cd flash-attention &&\
