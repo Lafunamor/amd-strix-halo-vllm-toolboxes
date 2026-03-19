@@ -28,7 +28,9 @@ RUN python -m pip install --upgrade pip wheel packaging "setuptools<80.0.0"
 # 5. Install PyTorch (TheRock Nightly)
 RUN python -m pip install \
   --index-url https://rocm.nightlies.amd.com/v2-staging/gfx1151/ \
-  --pre torch torchaudio torchvision
+  --pre torch torchaudio torchvision && \
+  # Fix caching/JSON serialization bug in recent PyTorch nightlies
+  sed -i 's/json.dumps(config_dict, sort_keys=True)/json.dumps(config_dict, sort_keys=True, default=str)/g' /opt/venv/lib64/python3.12/site-packages/torch/_dynamo/utils.py
 
 WORKDIR /opt
 

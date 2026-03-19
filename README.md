@@ -2,6 +2,7 @@
 
 An **Fedora 43** Docker/Podman container that is **Toolbx-compatible** (usable as a Fedora toolbox) for serving LLMs with **vLLM** on **AMD Ryzen AI Max “Strix Halo” (gfx1151)**. Built on the **TheRock nightly builds** for ROCm.
 
+> **Note on Vision Models:** To prevent indefinite hangs during MIOpen exhaustive kernel search, vision encoder profiling is currently patched out. This means **vision features are currently unavailable** for models like Qwen3.5 MoE. Thanks to user `3spky5u-oss` for contributing this patch! For more details, see [Issue #30](https://github.com/kyuz0/amd-strix-halo-vllm-toolboxes/issues/30).
 
 ---
 
