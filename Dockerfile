@@ -142,9 +142,9 @@ RUN echo "Installing Custom RCCL..." && \
   rm /tmp/librccl.so.1
 
 # 10. Force Upgrade Transformers (User Override)
-# Required for GLM Flash. vLLM reports incompatibility with transformers >= 5, 
-# but this version (5.0.0) has been tested and confirmed working.
-RUN python -m pip install transformers==5.0.0
+# Required for GLM Flash, Qwen 3.5 etc.... vLLM reports incompatibility with transformers >= 5, 
+# but this version (5.3.0) has been tested and confirmed working.
+RUN python -m pip install transformers==5.3.0
 
 RUN chmod -R a+rwX /opt
 

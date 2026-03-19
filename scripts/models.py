@@ -31,6 +31,12 @@ MODEL_TABLE = {
         "max_tokens": "8192"
     },
 
+    "Qwen/Qwen3.5-35B-A3B": {
+        "trust_remote": True,
+        "valid_tp": [1],
+        "max_num_seqs": "16",
+        "max_tokens": "8192"
+    },
 
     "Qwen/Qwen3-14B-AWQ": {
         "trust_remote": True,
@@ -40,6 +46,16 @@ MODEL_TABLE = {
         "enforce_eager": False, 
         "env": {"VLLM_USE_TRITON_AWQ": "1"} # Fixes "Unsupported Hardware" error
     },
+
+    "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit": {
+        "trust_remote": True,
+        "valid_tp": [1,2], # Too big for single GPU
+        "max_num_seqs": "64", # Strix Halo Optimized
+        "max_tokens": "16384", # Lower batch size because Eager mode is CPU intensive
+        "enforce_eager": True, 
+        "env": {"VLLM_USE_TRITON_AWQ": "1"} # Fixes "Unsupported Hardware" error
+    },
+
 
     # 4. Qwen 30B 4-bit
     "btbtyler09/Qwen3-Coder-30B-A3B-Instruct-gptq-4bit": {
@@ -99,7 +115,8 @@ MODELS_TO_RUN = [
     "btbtyler09/Qwen3-Coder-30B-A3B-Instruct-gptq-4bit",
     "btbtyler09/Qwen3-Coder-30B-A3B-Instruct-gptq-8bit",
     "dazipe/Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16",
-    "mratsim/MiniMax-M2.5-BF16-INT4-AWQ",
+    "Qwen/Qwen3.5-35B-A3B",
+    "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit"
 ]
 
 # Hardware / Global Defaults
