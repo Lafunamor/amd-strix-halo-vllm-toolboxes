@@ -16,46 +16,65 @@ else
     echo "ℹ️  No InfiniBand devices detected."
 fi
 
-# Check dependencies
-for cmd in podman toolbox; do
-  command -v "$cmd" > /dev/null || { echo "Error: '$cmd' is not installed." >&2; exit 1; }
-done
+# Detect container manager (toolbox requires podman; distrobox works with either)
+if command -v toolbox &>/dev/null && command -v podman &>/dev/null; then
+    MANAGER="toolbox"
+elif command -v distrobox &>/dev/null; then
+    MANAGER="distrobox"
+else
+    echo "Error: neither 'toolbox' (with podman) nor 'distrobox' is installed." >&2
+    exit 1
+fi
 
-echo "🔄 Refreshing $TOOLBOX_NAME (image: $IMAGE)"
+# Detect container runtime for image pull and cleanup
+if command -v podman &>/dev/null; then
+    RUNTIME="podman"
+elif command -v docker &>/dev/null; then
+    RUNTIME="docker"
+else
+    echo "Error: neither 'podman' nor 'docker' is installed." >&2
+    exit 1
+fi
 
-# Remove the toolbox if it exists
-if toolbox list 2>/dev/null | grep -q "$TOOLBOX_NAME"; then
-  echo "🧹 Removing existing toolbox: $TOOLBOX_NAME"
-  toolbox rm -f "$TOOLBOX_NAME"
+echo "🔄 Refreshing $TOOLBOX_NAME via $MANAGER (image: $IMAGE)"
+
+# Remove existing container if it exists
+if $MANAGER list 2>/dev/null | grep -q "$TOOLBOX_NAME"; then
+    echo "🧹 Removing existing $MANAGER: $TOOLBOX_NAME"
+    $MANAGER rm -f "$TOOLBOX_NAME"
 fi
 
 echo "⬇️ Pulling latest image: $IMAGE"
-podman pull "$IMAGE"
+$RUNTIME pull "$IMAGE"
 
-# Identify current image ID/digest for this tag
-new_id="$(podman image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || true)"
-new_digest="$(podman image inspect --format '{{.Digest}}' "$IMAGE" 2>/dev/null || true)"
+# Identify current image ID/digest for cleanup
+new_id="$($RUNTIME image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || true)"
+new_digest="$($RUNTIME image inspect --format '{{.Digest}}' "$IMAGE" 2>/dev/null || true)"
 
-echo "📦 Recreating toolbox: $TOOLBOX_NAME"
+echo "📦 Recreating $MANAGER: $TOOLBOX_NAME"
 echo "   Options: $OPTIONS"
-# Note: toolbox create passes arguments after '--' to podman create
-toolbox create "$TOOLBOX_NAME" --image "$IMAGE" -- $OPTIONS
+
+if [ "$MANAGER" = "toolbox" ]; then
+    # toolbox passes extra flags to podman via '--'
+    toolbox create "$TOOLBOX_NAME" --image "$IMAGE" -- $OPTIONS
+else
+    # distrobox passes extra flags via --additional-flags
+    distrobox create -n "$TOOLBOX_NAME" --image "$IMAGE" --additional-flags "$OPTIONS"
+fi
 
 # --- Cleanup: keep only the most recent image for this tag ---
 repo="${IMAGE%:*}"
 
-# Remove any other local images still carrying this exact tag but not the newest digest
 while read -r id ref dig; do
-  if [[ "$id" != "$new_id" ]]; then
-      podman image rm -f "$id" >/dev/null 2>&1 || true
-  fi
-done < <(podman images --digests --format '{{.ID}} {{.Repository}}:{{.Tag}} {{.Digest}}' \
+    if [[ "$id" != "$new_id" ]]; then
+        $RUNTIME image rm -f "$id" >/dev/null 2>&1 || true
+    fi
+done < <($RUNTIME images --digests --format '{{.ID}} {{.Repository}}:{{.Tag}} {{.Digest}}' \
          | awk -v ref="$IMAGE" -v ndig="$new_digest" '$2==ref && $3!=ndig')
 
-# Remove dangling images from this repository (typically prior pulls of this tag)
 while read -r id; do
-  podman image rm -f "$id" >/dev/null 2>&1 || true
-done < <(podman images --format '{{.ID}} {{.Repository}}:{{.Tag}}' \
+    $RUNTIME image rm -f "$id" >/dev/null 2>&1 || true
+done < <($RUNTIME images --format '{{.ID}} {{.Repository}}:{{.Tag}}' \
          | awk -v r="$repo" '$2==r":<none>" {print $1}')
 # --- end cleanup ---
 
