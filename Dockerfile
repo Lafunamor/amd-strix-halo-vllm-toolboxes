@@ -141,10 +141,6 @@ RUN echo "Installing Custom RCCL..." && \
   find /opt/venv -name "librccl.so.1" -exec cp -fv /tmp/librccl.so.1 {} + && \
   rm /tmp/librccl.so.1
 
-# 10. Force Upgrade Transformers (User Override)
-# Required for GLM Flash, Qwen 3.5 etc.... vLLM reports incompatibility with transformers >= 5, 
-# but this version (5.3.0) has been tested and confirmed working.
-RUN python -m pip install transformers==5.3.0
 
 RUN chmod -R a+rwX /opt
 
