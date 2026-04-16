@@ -99,8 +99,7 @@ RUN cmake -S . \
 
 # 8. Final Cleanup & Runtime
 WORKDIR /opt
-RUN chmod -R a+rwX /opt && \
-  find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true && \
+RUN find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true && \
   find /opt/venv -type d -name "__pycache__" -prune -exec rm -rf {} + && \
   rm -rf /root/.cache/pip || true && \
   dnf clean all && rm -rf /var/cache/dnf/*
