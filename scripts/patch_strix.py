@@ -7,18 +7,39 @@ from pathlib import Path
 def patch_vllm():
     print("Applying Strix Halo patches to vLLM (ai-notes modernization)...")
 
-    # Patch 1: vllm/platforms/__init__.py (amdsmi import prepend)
+    # Patch 1: vllm/platforms/__init__.py (Device detection bypass for APUs + amdsmi import prepend)
     p_init = Path('vllm/platforms/__init__.py')
     if p_init.exists():
         txt = p_init.read_text()
+        
+        # 1A. Prepend amdsmi import
         if "try:\n    import amdsmi" not in txt[:300]:
             header = ("# PATCHED: amdsmi import order (must be before torch)\n"
                       "try:\n"
                       "    import amdsmi  # noqa: F401\n"
                       "except ImportError:\n"
                       "    pass\n\n")
-            p_init.write_text(header + txt)
-            print(" -> Patched vllm/platforms/__init__.py (amdsmi import prepended)")
+            txt = header + txt
+
+        # 1B. Force is_rocm=True bypassing empty processor handles on APUs
+        txt = txt.replace('is_rocm = False\n    logger.debug("Checking if ROCm platform is available.")', 'is_rocm = True\n    logger.debug("Checking if ROCm platform is available.")')
+        # Just to catch variations
+        txt = txt.replace('if len(amdsmi.amdsmi_get_processor_handles()) > 0:', 'if True:')
+        
+        p_init.write_text(txt)
+        print(" -> Patched vllm/platforms/__init__.py (Device detection & amdsmi import prepended)")
+
+    # Patch 1.5: rocm.py (Force device type to gfx1151 for APUs)
+    p_rocm_plat = Path('vllm/platforms/rocm.py')
+    if p_rocm_plat.exists():
+        txt = p_rocm_plat.read_text()
+        if 'def _get_gcn_arch() -> str:\n    return "gfx1151"' not in txt:
+            txt = txt.replace('def _get_gcn_arch() -> str:', 'def _get_gcn_arch() -> str:\n    return "gfx1151"\n\ndef _old_get_gcn_arch() -> str:')
+            txt = re.sub(r'device_type = .*', 'device_type = "rocm"', txt)
+            if 'def get_device_name(self' in txt:
+                txt = re.sub(r'def get_device_name\(self, device_id: int = 0\) -> str:.*?return [^\n]+', 'def get_device_name(self, device_id: int = 0) -> str:\n        return "AMD-gfx1151"', txt, flags=re.DOTALL)
+            p_rocm_plat.write_text(txt)
+            print(" -> Patched vllm/platforms/rocm.py (Forced gfx1151 arch detection)")
 
     # Patch 2: _aiter_ops.py (Enable AITER on gfx1x, disable FP8 linear)
     p_aiter = Path('vllm/_aiter_ops.py')
