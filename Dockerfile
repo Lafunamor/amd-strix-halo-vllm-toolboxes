@@ -28,9 +28,7 @@ RUN python -m pip install --upgrade pip wheel packaging "setuptools<80.0.0"
 # 5. Install PyTorch (TheRock Nightly)
 RUN python -m pip install \
   --index-url https://rocm.nightlies.amd.com/v2-staging/gfx1151/ \
-  --pre torch torchaudio torchvision && \
-  # Fix caching/JSON serialization bug in recent PyTorch nightlies
-  sed -i 's/json.dumps(config_dict, sort_keys=True)/json.dumps(config_dict, sort_keys=True, default=str)/g' /opt/venv/lib64/python3.12/site-packages/torch/_dynamo/utils.py
+  --pre torch torchaudio torchvision
 
 WORKDIR /opt
 
@@ -50,8 +48,7 @@ WORKDIR /opt/vllm
 
 # --- PATCHING ---
 COPY scripts/patch_strix.py /opt/vllm/patch_strix.py
-RUN python /opt/vllm/patch_strix.py && \
-  sed -i 's/gfx1200;gfx1201/gfx1151/' CMakeLists.txt  
+RUN python /opt/vllm/patch_strix.py
 
 # 7. Build vLLM (Wheel Method) with CLANG Host Compiler
 RUN python -m pip install --upgrade cmake ninja packaging wheel numpy "setuptools-scm>=8" "setuptools<80.0.0" scikit-build-core pybind11
@@ -128,17 +125,6 @@ RUN chmod +x /opt/start-vllm /opt/start-vllm-cluster /opt/vllm_cluster_bench.py 
   chmod 0644 /etc/profile.d/*.sh /opt/max_context_results.json /opt/models.py
 RUN chmod 0644 /etc/profile.d/*.sh
 RUN printf 'ulimit -S -c 0\n' > /etc/profile.d/90-nocoredump.sh && chmod 0644 /etc/profile.d/90-nocoredump.sh
-
-# 9. Install Custom RCCL (gfx1151) - Replaces standard library with manually built one
-COPY custom_libs/librccl.so.1.gz /tmp/librccl.so.1.gz
-RUN echo "Installing Custom RCCL..." && \
-  gzip -d /tmp/librccl.so.1.gz && \
-  chmod 755 /tmp/librccl.so.1 && \
-  # Replace /opt/rocm library strictly as managed_rccl_install.sh does
-  cp -fv /tmp/librccl.so.1 /opt/rocm/lib/librccl.so.1.0 && \
-  # Replace /opt/venv library
-  find /opt/venv -name "librccl.so.1" -exec cp -fv /tmp/librccl.so.1 {} + && \
-  rm /tmp/librccl.so.1
 
 
 CMD ["/bin/bash"]
