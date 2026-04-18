@@ -18,6 +18,10 @@ An **Fedora 43** Docker/Podman container that is **Toolbx-compatible** (usable a
 
 This repository is part of the **[Strix Halo AI Toolboxes](https://strix-halo-toolboxes.com)** project. Check out the website for an overview of all toolboxes, tutorials, and host configuration guides.
 
+### 🙏 Acknowledgments
+
+A big thank you to the [paudley/ai-notes](https://github.com/paudley/ai-notes) repository and its meticulously documented `strix-halo` build pipeline. I have directly integrated and adapted their research to stabilize vLLM and Flash-Attention for Strix Halo. Specifically, this toolbox leverages their Triton `AttrsDescriptor` compilation patches and the manual `aiter` compilation strategy that bridges CDNA kernels seamlessly over to RDNA scalar C++ routines—enabling full AITER custom op acceleration (MoE, Attention, RMSNorm) out-of-the-box.
+
 ### ❤️ Support
 
 This is a hobby project maintained in my spare time. If you find these toolboxes and tutorials useful, you can **[buy me a coffee](https://buymeacoffee.com/dcapitella)** to support the work! ☕

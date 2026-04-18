@@ -35,14 +35,6 @@ WORKDIR /opt
 COPY scripts/patch_aiter_headers.py /opt/patch_aiter_headers.py
 RUN python -m pip install --upgrade cmake ninja packaging wheel numpy "setuptools-scm>=8" "setuptools<80.0.0" scikit-build-core pybind11 numba scipy
 
-# Install amdsmi from ROCm SDK (prevents "No module named 'amdsmi'" warnings)
-RUN if [ -d /opt/rocm/share/amd_smi ]; then \
-      pip install --force-reinstall --no-deps /opt/rocm/share/amd_smi; \
-    elif [ -d /opt/rocm/lib/amd_smi ]; then \
-      pip install --force-reinstall --no-deps /opt/rocm/lib/amd_smi; \
-    else \
-      echo "WARNING: amdsmi source not found in ROCm SDK (non-fatal)"; \
-    fi
 
 # Flash-Attention & AITER
 ENV FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE"

@@ -134,37 +134,38 @@ if _os.path.isdir(_jit_cache) and _jit_cache not in __path__:
     # Patch 8: flash_attn_interface.py — make aiter import soft as safety net.
     # If aiter JIT fails for any reason, flash_attn should still load (TRITON_ATTN works).
     # ROCM_ATTN will also work when aiter JIT succeeds (patch 7 fixes the path).
+    hard_import_bare = "from aiter.ops.triton._triton_kernels.flash_attn_triton_amd import flash_attn_2 as flash_attn_gpu"
+    
+    def _patch_flash_interface(fa_iface):
+        txt = fa_iface.read_text()
+        if hard_import_bare not in txt or "except (ImportError" in txt:
+            return False
+        # Detect indentation of the original import line
+        m = re.search(r'^( *)' + re.escape(hard_import_bare), txt, re.MULTILINE)
+        if not m:
+            return False
+        indent = m.group(1)
+        original_line = indent + hard_import_bare
+        soft_import = (
+            f"{indent}try:\n"
+            f"{indent}    {hard_import_bare}\n"
+            f"{indent}except (ImportError, KeyError, ModuleNotFoundError):\n"
+            f"{indent}    flash_attn_gpu = None"
+        )
+        txt = txt.replace(original_line, soft_import)
+        fa_iface.write_text(txt)
+        print(f" -> Patched {fa_iface} (aiter import made resilient)")
+        return True
+
     for sp in site.getsitepackages():
         for fa_egg in Path(sp).glob("flash_attn*.egg"):
             fa_iface = fa_egg / "flash_attn/flash_attn_interface.py"
             if fa_iface.exists():
-                txt = fa_iface.read_text()
-                hard_import = "from aiter.ops.triton._triton_kernels.flash_attn_triton_amd import flash_attn_2 as flash_attn_gpu"
-                if hard_import in txt and "except (ImportError" not in txt:
-                    soft_import = (
-                        "try:\n"
-                        "    from aiter.ops.triton._triton_kernels.flash_attn_triton_amd import flash_attn_2 as flash_attn_gpu\n"
-                        "except (ImportError, KeyError, ModuleNotFoundError):\n"
-                        "    flash_attn_gpu = None"
-                    )
-                    txt = txt.replace(hard_import, soft_import)
-                    fa_iface.write_text(txt)
-                    print(f" -> Patched {fa_iface} (aiter import made resilient)")
+                _patch_flash_interface(fa_iface)
         # Also check non-egg installs
         fa_iface = Path(sp) / "flash_attn/flash_attn_interface.py"
         if fa_iface.exists():
-            txt = fa_iface.read_text()
-            hard_import = "from aiter.ops.triton._triton_kernels.flash_attn_triton_amd import flash_attn_2 as flash_attn_gpu"
-            if hard_import in txt and "except (ImportError" not in txt:
-                soft_import = (
-                    "try:\n"
-                    "    from aiter.ops.triton._triton_kernels.flash_attn_triton_amd import flash_attn_2 as flash_attn_gpu\n"
-                    "except (ImportError, KeyError, ModuleNotFoundError):\n"
-                    "    flash_attn_gpu = None"
-                )
-                txt = txt.replace(hard_import, soft_import)
-                fa_iface.write_text(txt)
-                print(f" -> Patched {fa_iface} (aiter import made resilient)")
+            _patch_flash_interface(fa_iface)
 
     print("Successfully patched vLLM/Environment for Strix Halo.")
 
