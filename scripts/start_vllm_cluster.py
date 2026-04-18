@@ -159,7 +159,7 @@ def configure_and_launch_vllm(model_idx, head_ip):
     current_ctx = verified["ctx"]
     current_util = verified["util"]
     
-    clear_cache = False
+    clear_cache = True  # Default ON: stale graphs from version upgrades cause crashes
     # Default to eager mode for stability in cluster situations, especially at high concurrency
     use_eager = True
     trust_remote = True # Default True as per request

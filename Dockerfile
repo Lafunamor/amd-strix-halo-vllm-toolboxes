@@ -35,6 +35,15 @@ WORKDIR /opt
 COPY scripts/patch_aiter_headers.py /opt/patch_aiter_headers.py
 RUN python -m pip install --upgrade cmake ninja packaging wheel numpy "setuptools-scm>=8" "setuptools<80.0.0" scikit-build-core pybind11 numba scipy
 
+# Install amdsmi from ROCm SDK (prevents "No module named 'amdsmi'" warnings)
+RUN if [ -d /opt/rocm/share/amd_smi ]; then \
+      pip install --force-reinstall --no-deps /opt/rocm/share/amd_smi; \
+    elif [ -d /opt/rocm/lib/amd_smi ]; then \
+      pip install --force-reinstall --no-deps /opt/rocm/lib/amd_smi; \
+    else \
+      echo "WARNING: amdsmi source not found in ROCm SDK (non-fatal)"; \
+    fi
+
 # Flash-Attention & AITER
 ENV FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE"
 ENV LD_LIBRARY_PATH="/opt/rocm/lib:/opt/rocm/lib64:$LD_LIBRARY_PATH"
@@ -51,8 +60,17 @@ RUN git clone https://github.com/ROCm/flash-attention.git && \
     python /opt/patch_aiter_headers.py && \
     cd /opt/flash-attention && \
     python -c "import re; f=open('setup.py','r'); t=f.read(); f.close(); t=re.sub(r'subprocess\.run\([\s\S]*?third_party/aiter[\s\S]*?check=True,\s*\)', 'pass # patched', t); f=open('setup.py','w'); f.write(t)" && \
-    python setup.py install && \
+    pip install --no-build-isolation --no-deps . && \
     cd /opt && rm -rf /opt/flash-attention /opt/patch_aiter_headers.py
+
+# Fix Fedora lib vs lib64 split: setup.py install writes to lib/, pip to lib64/.
+# flash-attention's find_packages() may install a partial aiter copy into lib/.
+# Merge any straggler files from lib/ into lib64/ so Python finds everything.
+RUN if [ -d /opt/venv/lib/python3.12/site-packages/aiter ]; then \
+      cp -rn /opt/venv/lib/python3.12/site-packages/aiter/* \
+             /opt/venv/lib64/python3.12/site-packages/aiter/ 2>/dev/null || true; \
+      rm -rf /opt/venv/lib/python3.12/site-packages/aiter; \
+    fi
 
 # 6. Clone vLLM
 # Optional: pin to a specific vLLM commit for reproducible builds.

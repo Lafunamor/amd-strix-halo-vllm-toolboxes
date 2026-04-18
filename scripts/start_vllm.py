@@ -2,6 +2,7 @@
 import sys
 import os
 import json
+import time
 import shutil
 import tempfile
 import subprocess
@@ -193,7 +194,7 @@ def configure_and_launch(model_idx, gpu_count):
     current_ctx = verified["ctx"]
     current_util = verified["util"]
     
-    clear_cache = False
+    clear_cache = True  # Default ON: stale graphs from version upgrades cause crashes
     use_eager = config.get("enforce_eager", False) # Default to model config, usually False
     use_rocm_attn = False # Default to Triton (ROCM_ATTN has regression on gfx1151, vllm commit 189ddefbf / #36702)
     

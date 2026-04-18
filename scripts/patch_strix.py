@@ -113,9 +113,61 @@ def patch_vllm():
                 triton_compiler.write_text(txt)
                 print(f" -> Patched {triton_compiler} (AttrsDescriptor repr)")
 
-    # Patch 7: chunk_delta_h autotuner restrictions
-    p_chunk_o = Path('vllm/v1/attention/backends/rocm_flash_attn.py') # Note: AITER chunk autotuners might be in vLLM or standard triton kernels. Assuming typical vllm source tree here, or we can just apply globally.
-    # We will let the Dockerfile logic handle flash-attention setup.py patching.
+    # Patch 7: aiter JIT path fix — aiter builds .so files into ~/.aiter/jit/
+    # but importlib.import_module("aiter.jit.<module>") only looks in the
+    # installed package directory. Fix by adding the JIT cache to __path__.
+    for sp in site.getsitepackages():
+        aiter_jit_init = Path(sp) / "aiter/jit/__init__.py"
+        if aiter_jit_init.exists():
+            txt = aiter_jit_init.read_text()
+            if "# PATCHED: JIT cache path" not in txt:
+                jit_path_fix = '''
+# PATCHED: JIT cache path for Strix Halo
+# aiter's JIT compiles .so modules into ~/.aiter/jit/ but importlib looks
+# in the installed package directory. Add the JIT cache to __path__.
+import os as _os
+_jit_cache = _os.path.join(_os.path.expanduser("~"), ".aiter", "jit")
+if _os.path.isdir(_jit_cache) and _jit_cache not in __path__:
+    __path__.append(_jit_cache)
+'''
+                txt += jit_path_fix
+                aiter_jit_init.write_text(txt)
+                print(f" -> Patched {aiter_jit_init} (JIT cache added to __path__)")
+
+    # Patch 8: flash_attn_interface.py — make aiter import soft as safety net.
+    # If aiter JIT fails for any reason, flash_attn should still load (TRITON_ATTN works).
+    # ROCM_ATTN will also work when aiter JIT succeeds (patch 7 fixes the path).
+    for sp in site.getsitepackages():
+        for fa_egg in Path(sp).glob("flash_attn*.egg"):
+            fa_iface = fa_egg / "flash_attn/flash_attn_interface.py"
+            if fa_iface.exists():
+                txt = fa_iface.read_text()
+                hard_import = "from aiter.ops.triton._triton_kernels.flash_attn_triton_amd import flash_attn_2 as flash_attn_gpu"
+                if hard_import in txt and "except (ImportError" not in txt:
+                    soft_import = (
+                        "try:\n"
+                        "    from aiter.ops.triton._triton_kernels.flash_attn_triton_amd import flash_attn_2 as flash_attn_gpu\n"
+                        "except (ImportError, KeyError, ModuleNotFoundError):\n"
+                        "    flash_attn_gpu = None"
+                    )
+                    txt = txt.replace(hard_import, soft_import)
+                    fa_iface.write_text(txt)
+                    print(f" -> Patched {fa_iface} (aiter import made resilient)")
+        # Also check non-egg installs
+        fa_iface = Path(sp) / "flash_attn/flash_attn_interface.py"
+        if fa_iface.exists():
+            txt = fa_iface.read_text()
+            hard_import = "from aiter.ops.triton._triton_kernels.flash_attn_triton_amd import flash_attn_2 as flash_attn_gpu"
+            if hard_import in txt and "except (ImportError" not in txt:
+                soft_import = (
+                    "try:\n"
+                    "    from aiter.ops.triton._triton_kernels.flash_attn_triton_amd import flash_attn_2 as flash_attn_gpu\n"
+                    "except (ImportError, KeyError, ModuleNotFoundError):\n"
+                    "    flash_attn_gpu = None"
+                )
+                txt = txt.replace(hard_import, soft_import)
+                fa_iface.write_text(txt)
+                print(f" -> Patched {fa_iface} (aiter import made resilient)")
 
     print("Successfully patched vLLM/Environment for Strix Halo.")
 
