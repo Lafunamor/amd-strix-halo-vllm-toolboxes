@@ -43,8 +43,14 @@ RUN git clone https://github.com/ROCm/flash-attention.git &&\
   cd /opt && rm -rf /opt/flash-attention
 
 # 6. Clone vLLM
+# Optional: pin to a specific vLLM commit for reproducible builds.
+# Defaults to empty (tracks upstream HEAD). Override with --build-arg VLLM_COMMIT=<sha>.
+ARG VLLM_COMMIT=
 RUN git clone https://github.com/vllm-project/vllm.git /opt/vllm
 WORKDIR /opt/vllm
+RUN if [ -n "$VLLM_COMMIT" ]; then \
+      echo "Pinning vLLM to commit $VLLM_COMMIT" && git checkout "$VLLM_COMMIT"; \
+    fi
 
 # --- PATCHING ---
 COPY scripts/patch_strix.py /opt/vllm/patch_strix.py
