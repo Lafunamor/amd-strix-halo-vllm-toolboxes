@@ -7,39 +7,36 @@ from pathlib import Path
 def patch_vllm():
     print("Applying Strix Halo patches to vLLM (ai-notes modernization)...")
 
-    # Patch 1: vllm/platforms/__init__.py (Device detection bypass for APUs + amdsmi import prepend)
+    # Patch 1: vllm/platforms/__init__.py (amdsmi monkey patch — PROVEN working for 5 months)
+    # Comment out real amdsmi imports and replace with pass stubs.
+    # The actual amdsmi library doesn't work on Strix Halo APUs in containers.
     p_init = Path('vllm/platforms/__init__.py')
     if p_init.exists():
         txt = p_init.read_text()
-        
-        # 1A. Prepend amdsmi import
-        if "try:\n    import amdsmi" not in txt[:300]:
-            header = ("# PATCHED: amdsmi import order (must be before torch)\n"
-                      "try:\n"
-                      "    import amdsmi  # noqa: F401\n"
-                      "except ImportError:\n"
-                      "    pass\n\n")
-            txt = header + txt
-
-        # 1B. Force is_rocm=True bypassing empty processor handles on APUs
-        txt = txt.replace('is_rocm = False\n    logger.debug("Checking if ROCm platform is available.")', 'is_rocm = True\n    logger.debug("Checking if ROCm platform is available.")')
-        # Just to catch variations
-        txt = txt.replace('if len(amdsmi.amdsmi_get_processor_handles()) > 0:', 'if True:')
-        
+        txt = txt.replace('import amdsmi', '# import amdsmi')
+        txt = re.sub(r'is_rocm = .*', 'is_rocm = True', txt)
+        txt = re.sub(r'if len\(amdsmi\.amdsmi_get_processor_handles\(\)\) > 0:', 'if True:', txt)
+        txt = txt.replace('amdsmi.amdsmi_init()', 'pass')
+        txt = txt.replace('amdsmi.amdsmi_shut_down()', 'pass')
         p_init.write_text(txt)
-        print(" -> Patched vllm/platforms/__init__.py (Device detection & amdsmi import prepended)")
+        print(" -> Patched vllm/platforms/__init__.py (amdsmi disabled, is_rocm forced True)")
 
-    # Patch 1.5: rocm.py (Force device type to gfx1151 for APUs)
+    # Patch 1.5: vllm/platforms/rocm.py (MagicMock amdsmi + force gfx1151)
+    # Prepend MagicMock so any remaining amdsmi references in rocm.py silently succeed.
     p_rocm_plat = Path('vllm/platforms/rocm.py')
     if p_rocm_plat.exists():
         txt = p_rocm_plat.read_text()
+        # Add MagicMock header if not already present
+        if 'sys.modules["amdsmi"] = MagicMock()' not in txt:
+            header = 'import sys\nfrom unittest.mock import MagicMock\nsys.modules["amdsmi"] = MagicMock()\n'
+            txt = header + txt
+        # Force arch detection
         if 'def _get_gcn_arch() -> str:\n    return "gfx1151"' not in txt:
             txt = txt.replace('def _get_gcn_arch() -> str:', 'def _get_gcn_arch() -> str:\n    return "gfx1151"\n\ndef _old_get_gcn_arch() -> str:')
             txt = re.sub(r'device_type = .*', 'device_type = "rocm"', txt)
-            if 'def get_device_name(self' in txt:
-                txt = re.sub(r'def get_device_name\(self, device_id: int = 0\) -> str:.*?return [^\n]+', 'def get_device_name(self, device_id: int = 0) -> str:\n        return "AMD-gfx1151"', txt, flags=re.DOTALL)
-            p_rocm_plat.write_text(txt)
-            print(" -> Patched vllm/platforms/rocm.py (Forced gfx1151 arch detection)")
+            txt = re.sub(r'device_name = .*', 'device_name = "gfx1151"', txt)
+        p_rocm_plat.write_text(txt)
+        print(" -> Patched vllm/platforms/rocm.py (MagicMock amdsmi + forced gfx1151)")
 
     # Patch 2: _aiter_ops.py (Enable AITER on gfx1x, disable FP8 linear)
     p_aiter = Path('vllm/_aiter_ops.py')
