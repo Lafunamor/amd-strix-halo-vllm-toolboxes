@@ -32,15 +32,27 @@ RUN python -m pip install \
 
 WORKDIR /opt
 
-# Flash-Attention
+COPY scripts/patch_aiter_headers.py /opt/patch_aiter_headers.py
+RUN python -m pip install --upgrade cmake ninja packaging wheel numpy "setuptools-scm>=8" "setuptools<80.0.0" scikit-build-core pybind11 numba scipy
+
+# Flash-Attention & AITER
 ENV FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE"
 ENV LD_LIBRARY_PATH="/opt/rocm/lib:/opt/rocm/lib64:$LD_LIBRARY_PATH"
 
-RUN git clone https://github.com/ROCm/flash-attention.git &&\ 
-  cd flash-attention &&\
-  git checkout main_perf &&\
-  python setup.py install && \
-  cd /opt && rm -rf /opt/flash-attention
+RUN git clone https://github.com/ROCm/flash-attention.git && \
+    cd flash-attention && \
+    git checkout main_perf && \
+    git submodule update --init third_party/aiter && \
+    cd third_party/aiter && \
+    git submodule update --init 3rdparty/composable_kernel && \
+    export CK_DIR="$(pwd)/3rdparty/composable_kernel" && \
+    python -m pip wheel --no-build-isolation --no-deps -w /tmp/dist -v . && \
+    python -m pip install --force-reinstall /tmp/dist/amd_aiter*.whl && \
+    python /opt/patch_aiter_headers.py && \
+    cd /opt/flash-attention && \
+    python -c "import re; f=open('setup.py','r'); t=f.read(); f.close(); t=re.sub(r'subprocess\.run\([\s\S]*?third_party/aiter[\s\S]*?check=True,\s*\)', 'pass # patched', t); f=open('setup.py','w'); f.write(t)" && \
+    python setup.py install && \
+    cd /opt && rm -rf /opt/flash-attention /opt/patch_aiter_headers.py
 
 # 6. Clone vLLM
 # Optional: pin to a specific vLLM commit for reproducible builds.
@@ -57,7 +69,6 @@ COPY scripts/patch_strix.py /opt/vllm/patch_strix.py
 RUN python /opt/vllm/patch_strix.py
 
 # 7. Build vLLM (Wheel Method) with CLANG Host Compiler
-RUN python -m pip install --upgrade cmake ninja packaging wheel numpy "setuptools-scm>=8" "setuptools<80.0.0" scikit-build-core pybind11
 ENV ROCM_HOME="/opt/rocm"
 ENV HIP_PATH="/opt/rocm"
 ENV VLLM_TARGET_DEVICE="rocm"
