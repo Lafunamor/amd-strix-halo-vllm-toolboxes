@@ -124,7 +124,7 @@ jobs:
           provenance: false
           sbom: false
           cache-from: type=registry,ref=docker.io/${{ env.IMAGE_REPO }}:buildcache
-          cache-to: type=registry,ref=docker.io/${{ env.IMAGE_REPO }}:buildcache,mode=max
+          cache-to: type=registry,ref=docker.io/${{ env.IMAGE_REPO }}:buildcache,mode=min
 
       - name: Prune buildx cache
         if: always()
