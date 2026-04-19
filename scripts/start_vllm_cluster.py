@@ -116,7 +116,7 @@ def setup_head_node(head_ip):
 def get_verified_config(model_id, tp_size, max_seqs):
     """Reads max_context_results.json."""
     default_config = {
-        "ctx": int(MODEL_TABLE.get(model_id, {}).get("ctx", 8192)),
+        "ctx": 8192,
         "util": 0.90
     }
     
@@ -160,16 +160,16 @@ def configure_and_launch_vllm(model_idx, head_ip):
     current_util = verified["util"]
     
     clear_cache = True  # Default ON: stale graphs from version upgrades cause crashes
-    # Default to eager mode for stability in cluster situations, especially at high concurrency
-    use_eager = True
+    # Default to eager mode for stability in cluster situations, unless explicitly disabled
+    use_eager = config.get("enforce_eager", True)
     trust_remote = True # Default True as per request
-    use_rocm_attn = False # Default to Triton (ROCM_ATTN has regression on gfx1151, vllm commit 189ddefbf / #36702)
+    attn_backends = ["Triton", "ROCm (CK)", "AITER"]
+    current_attn_backend = "Triton" # Default to Triton
 
     while True:
         cache_status = "YES" if clear_cache else "NO"
         eager_status = "YES" if use_eager else "NO"
         trust_status = "YES" if trust_remote else "NO"
-        attn_backend = "ROCm" if use_rocm_attn else "Triton"
 
         menu_args = [
             "--clear", "--backtitle", f"AMD VLLM CLUSTER Launcher (Head: {head_ip})",
@@ -180,7 +180,7 @@ def configure_and_launch_vllm(model_idx, head_ip):
             "3", f"Context Length:       {current_ctx}",
             "4", f"GPU Utilization:      {current_util}",
             "5", f"Trust Remote Code:    {trust_status}",
-            "6", f"Attention Backend:    {attn_backend}",
+            "6", f"Attention Backend:    {current_attn_backend}",
             "7", f"Erase vLLM Cache:     {cache_status}",
             "8", f"Force Eager Mode:     {eager_status}",
             "9", "LAUNCH SERVER"
@@ -236,7 +236,8 @@ def configure_and_launch_vllm(model_idx, head_ip):
             trust_remote = not trust_remote
 
         elif choice == "6":
-            use_rocm_attn = not use_rocm_attn
+            idx = attn_backends.index(current_attn_backend)
+            current_attn_backend = attn_backends[(idx + 1) % len(attn_backends)]
 
         elif choice == "7":
             clear_cache = not clear_cache
@@ -276,9 +277,9 @@ def configure_and_launch_vllm(model_idx, head_ip):
     env["NCCL_IB_GID_INDEX"] = "1"
     env["NCCL_NET_GDR_LEVEL"] = "0"
     
-    # Also need this for Ray backend?
-    # vLLM usually handles ray connection if we pass --distributed-executor-backend ray
-    
+    if current_attn_backend == "AITER":
+        env["VLLM_ROCM_USE_AITER"] = "1"
+        
     cmd = [
         "vllm", "serve", model_id,
         "--host", HOST,
@@ -289,7 +290,9 @@ def configure_and_launch_vllm(model_idx, head_ip):
         "--dtype", "auto"
     ]
 
-    if use_rocm_attn:
+    if current_attn_backend == "AITER":
+        cmd.extend(["--attention-backend", "ROCM_ATTN"])
+    elif current_attn_backend == "ROCm (CK)":
         cmd.extend(["--attention-backend", "ROCM_ATTN"])
     else:
         cmd.extend(["--attention-backend", "TRITON_ATTN"])
@@ -321,6 +324,9 @@ def configure_and_launch_vllm(model_idx, head_ip):
         "NCCL_IB_GID_INDEX",
         "NCCL_NET_GDR_LEVEL"
     ]
+    if "VLLM_ROCM_USE_AITER" in env:
+        vars_to_print.append("VLLM_ROCM_USE_AITER")
+        
     for k in vars_to_print:
         if k in env:
             print(f" export {k}={env[k]}")

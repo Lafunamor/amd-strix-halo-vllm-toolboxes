@@ -163,10 +163,10 @@ def get_cluster_env():
     return env
 
 def get_model_args(model, overrides=None):
-    config = MODEL_TABLE.get(model, {"max_num_seqs": "32"})
+    config = MODEL_TABLE.get(model, {})
     overrides = overrides or {}
-    util = overrides.get("gpu_util", config.get("gpu_util", GPU_UTIL))
-    max_seq_override = overrides.get("max_num_seqs", config.get("max_num_seqs", "32"))
+    util = overrides.get("gpu_util", GPU_UTIL)
+    max_seq_override = overrides.get("max_num_seqs", "16")
 
     cmd = [
         "--model", model,
@@ -178,8 +178,8 @@ def get_model_args(model, overrides=None):
     ]
     
     # Optional ctx
-    if "ctx" in overrides or "ctx" in config:
-        cmd.extend(["--max-model-len", str(overrides.get("ctx", config.get("ctx")))])
+    if "ctx" in overrides:
+        cmd.extend(["--max-model-len", str(overrides.get("ctx"))])
         
     if config.get("trust_remote"): cmd.append("--trust-remote-code")
     
@@ -210,7 +210,7 @@ def run_bench_set(model, backend_name, output_dir, extra_env=None, overrides=Non
     dataset_path = get_dataset()
     dataset_args = ["--dataset-name", "sharegpt", "--dataset-path", dataset_path] if dataset_path else ["--input-len", "1024"]
     
-    batch_tokens = str(overrides.get("max_tokens", MODEL_TABLE.get(model, {}).get("max_tokens", DEFAULT_BATCH_TOKENS)))
+    batch_tokens = str(overrides.get("max_tokens", DEFAULT_BATCH_TOKENS))
 
     log(f"START {model} [TP={CLUSTER_TP} | {backend_name}]...")
     
@@ -226,7 +226,7 @@ def run_bench_set(model, backend_name, output_dir, extra_env=None, overrides=Non
     ])
     cmd.extend(dataset_args)
 
-    if backend_name == "ROCm-Attn":
+    if backend_name == "ROCm-Attn" or backend_name == "AITER-Attn":
         cmd.extend(["--attention-backend", "ROCM_ATTN"])
 
     env = get_cluster_env()
@@ -276,12 +276,25 @@ def run_cluster_throughput(model, overrides=None):
             overrides=overrides
         )
 
+    # 3. AITER Attention Run
+    if get_benchmark_output_file(model, "benchmark_results_aiter", tag).exists():
+        log(f"SKIP {model} [AITER-Attn] (Result exists)")
+    else:
+        restart_cluster()
+        run_bench_set(
+            model,
+            "AITER-Attn",
+            "benchmark_results_aiter",
+            extra_env={"VLLM_ROCM_USE_AITER": "1"},
+            overrides=overrides
+        )
+
 
 def print_summary():
     eth_suffix = "_eth" if FORCE_ETH else ""
     title_suffix = " (Ethernet ONLY)" if FORCE_ETH else ""
-    print(f"\n{f'MODEL (TP={CLUSTER_TP}){title_suffix}':<50} | {'Tag':<15} | {'Triton':<8} | {'ROCm':<8}")
-    print("-" * 92)
+    print(f"\n{f'MODEL (TP={CLUSTER_TP}){title_suffix}':<50} | {'Tag':<15} | {'Triton':<8} | {'ROCm':<8} | {'AITER':<8}")
+    print("-" * 103)
     
     for m in MODELS_TO_RUN:
         msafe = m.replace("/", "_")
@@ -299,6 +312,11 @@ def print_summary():
             tags.add(tag)
             
         for p in Path("benchmark_results_rocm").glob(f"{prefix}*_throughput.json"):
+            name_part = p.name[len(prefix):-len("_throughput.json")]
+            tag = name_part.lstrip("_")
+            tags.add(tag)
+            
+        for p in Path("benchmark_results_aiter").glob(f"{prefix}*_throughput.json"):
             name_part = p.name[len(prefix):-len("_throughput.json")]
             tag = name_part.lstrip("_")
             tags.add(tag)
@@ -330,10 +348,20 @@ def print_summary():
                     val2 = "N/A"
             except: val2 = "N/A"
 
+            # AITER
+            try:
+                p3 = Path("benchmark_results_aiter") / f"{prefix}{tag_suffix}_throughput.json"
+                if p3.exists():
+                    d3 = json.loads(p3.read_text())
+                    val3 = f"{d3.get('tokens_per_second', 0):.1f}"
+                else:
+                    val3 = "N/A"
+            except: val3 = "N/A"
+
             display_tag = tag if tag else "(Default)"
-            print(f"{name_cell:<50} | {display_tag:<15} | {val1:<8} | {val2:<8}")
+            print(f"{name_cell:<50} | {display_tag:<15} | {val1:<8} | {val2:<8} | {val3:<8}")
             
-    print("-" * 92)
+    print("-" * 103)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="VLLM Cluster Benchmark")
@@ -417,10 +445,10 @@ if __name__ == "__main__":
         overrides = {}
         if args.tui:
             config = MODEL_TABLE.get(m, {})
-            default_seqs = config.get("max_num_seqs", "32")
-            default_tokens = config.get("max_tokens", DEFAULT_BATCH_TOKENS)
-            default_util = config.get("gpu_util", GPU_UTIL)
-            default_ctx = config.get("ctx", "auto")
+            default_seqs = "16"
+            default_tokens = DEFAULT_BATCH_TOKENS
+            default_util = GPU_UTIL
+            default_ctx = "auto"
             
             form_args = [
                 "--clear", "--backtitle", f"AMD VLLM Cluster Benchmark Configuration (TP: {CLUSTER_TP})",
