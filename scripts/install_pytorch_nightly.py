@@ -42,4 +42,7 @@ for u in urls:
     print(f" - {u}")
 
 print("Installing PyTorch wheels via pip...")
-subprocess.check_call([sys.executable, "-m", "pip", "install"] + urls)
+subprocess.check_call([
+    sys.executable, "-m", "pip", "install", 
+    "--index-url", f"{base_url}/", "--pre",
+] + urls)
