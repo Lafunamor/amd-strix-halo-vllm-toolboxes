@@ -11,10 +11,12 @@ ARG ROCM_MAJOR_VER=7
 ARG GFX=gfx1151
 # We pass ARGs to the script via ENV or rely on defaults. 
 # But let's be explicit and export them for the RUN command.
+ARG ROCM_NIGHTLY_DATE=""
 COPY scripts/install_rocm_sdk.sh /tmp/install_rocm_sdk.sh
 RUN chmod +x /tmp/install_rocm_sdk.sh && \
   export ROCM_MAJOR_VER=$ROCM_MAJOR_VER && \
   export GFX=$GFX && \
+  export ROCM_NIGHTLY_DATE=$ROCM_NIGHTLY_DATE && \
   /tmp/install_rocm_sdk.sh
 
 # 4. Python Venv Setup
@@ -26,9 +28,20 @@ RUN printf 'source /opt/venv/bin/activate\n' > /etc/profile.d/venv.sh
 RUN python -m pip install --upgrade pip wheel packaging "setuptools<80.0.0"
 
 # 5. Install PyTorch (TheRock Nightly)
-RUN python -m pip install \
-  --index-url https://rocm.nightlies.amd.com/v2-staging/gfx1151/ \
-  --pre torch torchaudio torchvision
+RUN if [ -z "$ROCM_NIGHTLY_DATE" ]; then \
+      python -m pip install \
+        --index-url https://rocm.nightlies.amd.com/v2-staging/gfx1151/ \
+        --pre torch torchaudio torchvision; \
+    else \
+      export BASE_URL="https://rocm.nightlies.amd.com/v2-staging/gfx1151"; \
+      python -c "import urllib.request, re, os; \
+      d = os.environ['ROCM_NIGHTLY_DATE']; \
+      b = os.environ['BASE_URL']; \
+      pkgs = ['torch', 'torchaudio', 'torchvision']; \
+      urls = [f'{b}/{m.group(1)}' for p in pkgs for m in [re.search(fr'href=\"\.\./({p}-.*?a{d}-cp312-cp312-linux_x86_64\.whl)\"', urllib.request.urlopen(f'{b}/{p}/').read().decode('utf-8'))] if m]; \
+      if len(urls) != 3: raise RuntimeError(f'Could not find all PyTorch wheels for date {d}'); \
+      os.system(f'python -m pip install {\" \".join(urls)}')"; \
+    fi
 
 WORKDIR /opt
 
