@@ -1,6 +1,5 @@
 import sys
 import re
-import glob
 import site
 from pathlib import Path
 
@@ -63,27 +62,6 @@ def patch_vllm():
             txt = txt.replace("current_platform.on_gfx9()", "(current_platform.on_gfx9() or current_platform.on_gfx1x())")
         p_fa.write_text(txt)
         print(" -> Patched vllm/v1/attention/backends/rocm_aiter_fa.py (gfx1x support)")
-
-    # Patch 4: Skip encoder cache profiling (MIOpen hangs on gfx1151)
-    gpu_runner_files = glob.glob('vllm/**/gpu_model_runner.py', recursive=True)
-    for f in gpu_runner_files:
-        p = Path(f)
-        txt = p.read_text()
-        if '_get_mm_dummy_batch' in txt and '#PATCHED' not in txt:
-            lines = txt.split('\n')
-            in_block = False
-            patched_lines = []
-            for line in lines:
-                if '_get_mm_dummy_batch' in line and 'batched_dummy_mm_inputs' in line:
-                    in_block = True
-                if in_block:
-                    patched_lines.append('#PATCHED# ' + line)
-                    if 'encoder_cache[' in line:  # Broader catch
-                        in_block = False
-                else:
-                    patched_lines.append(line)
-            p.write_text('\n'.join(patched_lines))
-            print(f" -> Patched encoder profiling in {f}")
 
     # Patch 5: custom_ops RMSNorm block on gfx1x (Full CUDA Graph capture)
     p_rocm = Path('vllm/platforms/rocm.py')
