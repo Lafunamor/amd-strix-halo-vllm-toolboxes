@@ -2,8 +2,6 @@
 
 An **Fedora 43** Docker/Podman container that is **Toolbx-compatible** (usable as a Fedora toolbox) for serving LLMs with **vLLM** on **AMD Ryzen AI Max “Strix Halo” (gfx1151)**. Built on the **TheRock nightly builds** for ROCm.
 
-> **Note on Vision Models:** To prevent indefinite hangs during MIOpen exhaustive kernel search, vision encoder profiling is currently patched out. This means **vision features are currently unavailable** for models like Qwen3.5 MoE. Thanks to user `3spky5u-oss` for contributing this patch! For more details, see [Issue #30](https://github.com/kyuz0/amd-strix-halo-vllm-toolboxes/issues/30).
-
 ---
 
 ## 🚀 High-Performance Clustering Support (New!)
@@ -18,24 +16,14 @@ An **Fedora 43** Docker/Podman container that is **Toolbx-compatible** (usable a
 
 This repository is part of the **[Strix Halo AI Toolboxes](https://strix-halo-toolboxes.com)** project. Check out the website for an overview of all toolboxes, tutorials, and host configuration guides.
 
-### 🙏 Acknowledgments
-
-A big thank you to the [paudley/ai-notes](https://github.com/paudley/ai-notes) repository and its meticulously documented `strix-halo` build pipeline. I have directly integrated and adapted their research to stabilize vLLM and Flash-Attention for Strix Halo. Specifically, this toolbox leverages their Triton `AttrsDescriptor` compilation patches and the manual `aiter` compilation strategy that bridges CDNA kernels seamlessly over to RDNA scalar C++ routines—enabling full AITER custom op acceleration (MoE, Attention, RMSNorm) out-of-the-box.
-
-### 🧩 AITER on Strix Halo Support Status
-
-This toolbox supports running **AITER Flash Attention** on Strix Halo (gfx1151). Normally, vLLM crashes on RDNA APUs if `VLLM_ROCM_USE_AITER=1` is enabled, because AITER attempts to JIT-compile CDNA-specific MoE (Mixture of Experts) and CustomOps assembly instructions that lack RDNA hardware support.
-
-To bypass this limitation, `scripts/patch_strix.py` applies a few APU-specific guards (building on the work from `ai-notes` linked above):
-* **Patch 2 (`vllm/_aiter_ops.py`)**: Intercepts the MoE gate (`is_fused_moe_enabled()`) forcing it to disable AITER MoE and Linear FP8 on `gfx1x` architectures.
-* **Patch 3.5 (`vllm/model_executor/layers/fused_moe/oracle/unquantized.py`)**: Blocks the `VLLM_ROCM_USE_AITER_MOE` environment variable from forcing a JIT compile override.
-* **Patch 5 (`vllm/platforms/rocm.py`)**: Bypasses the RMSNorm custom op registration on `gfx1x` to prevent CUDA Graph capture crashes during model initialization.
-
-Because of these patches, when `ROCm` Attention is selected in the launcher, vLLM routes Attention to AITER (using the `ds_swizzle` RDNA header fallbacks injected via `scripts/patch_aiter_headers.py`), while safely falling back to Triton for MoE matrices and Torch/Triton for RMSNorm.
-
 ### ❤️ Support
 
 This is a hobby project maintained in my spare time. If you find these toolboxes and tutorials useful, you can **[buy me a coffee](https://buymeacoffee.com/dcapitella)** to support the work! ☕
+
+## 🙏 Acknowledgments
+
+* **Adrian ([@Lafunamor](https://github.com/Lafunamor))**: Huge thanks for all the help, PRs, and testing to get this project stabilized!
+* **Patrick Audley ([paudley/ai-notes](https://github.com/paudley/ai-notes))**: Thanks for the `strix-halo` build notes. This toolbox relies on that research (specifically the Triton patches and `aiter` compilation strategy) to successfully run vLLM and AITER Flash-Attention on Strix Halo.
 
 ---
 
@@ -250,3 +238,14 @@ This toolbox supports high-performance clustering of multiple Strix Halo nodes u
 *   **Custom RCCL Patch:** Use of a custom-built `librccl.so` to support RDMA on `gfx1151`.
 *   **Easy Setup:** `refresh_toolbox.sh` automatically detects and exposes RDMA devices.
 *   **Cluster Management:** Included `start-vllm-cluster` TUI for managing Ray and vLLM.
+
+## 8) AITER on Strix Halo Support Status
+
+This toolbox supports running **AITER Flash Attention** on Strix Halo (gfx1151). Normally, vLLM crashes on RDNA APUs if `VLLM_ROCM_USE_AITER=1` is enabled, because AITER attempts to JIT-compile CDNA-specific MoE (Mixture of Experts) and CustomOps assembly instructions that lack RDNA hardware support.
+
+To bypass this limitation, `scripts/patch_strix.py` applies a few APU-specific guards (building on the work from `ai-notes` linked above):
+* **Patch 2 (`vllm/_aiter_ops.py`)**: Intercepts the MoE gate (`is_fused_moe_enabled()`) forcing it to disable AITER MoE and Linear FP8 on `gfx1x` architectures.
+* **Patch 3.5 (`vllm/model_executor/layers/fused_moe/oracle/unquantized.py`)**: Blocks the `VLLM_ROCM_USE_AITER_MOE` environment variable from forcing a JIT compile override.
+* **Patch 5 (`vllm/platforms/rocm.py`)**: Bypasses the RMSNorm custom op registration on `gfx1x` to prevent CUDA Graph capture crashes during model initialization.
+
+Because of these patches, when `ROCm` Attention is selected in the launcher, vLLM routes Attention to AITER (using the `ds_swizzle` RDNA header fallbacks injected via `scripts/patch_aiter_headers.py`), while safely falling back to Triton for MoE matrices and Torch/Triton for RMSNorm.
