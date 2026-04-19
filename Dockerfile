@@ -59,10 +59,15 @@ RUN git clone https://github.com/ROCm/flash-attention.git && \
 # Fix Fedora lib vs lib64 split: setup.py install writes to lib/, pip to lib64/.
 # flash-attention's find_packages() may install a partial aiter copy into lib/.
 # Merge any straggler files from lib/ into lib64/ so Python finds everything.
-RUN if [ -d /opt/venv/lib/python3.12/site-packages/aiter ]; then \
-      cp -rn /opt/venv/lib/python3.12/site-packages/aiter/* \
-             /opt/venv/lib64/python3.12/site-packages/aiter/ 2>/dev/null || true; \
-      rm -rf /opt/venv/lib/python3.12/site-packages/aiter; \
+# When lib64 is a symlink to lib (Fedora's default venv layout), the two
+# site-packages dirs resolve to the same path — skip the merge, since the
+# cp-into-self then rm-rf would delete the entire aiter package.
+RUN lib_sp=/opt/venv/lib/python3.12/site-packages; \
+    lib64_sp=/opt/venv/lib64/python3.12/site-packages; \
+    if [ "$(readlink -f "$lib_sp")" != "$(readlink -f "$lib64_sp")" ] && \
+       [ -d "$lib_sp/aiter" ]; then \
+      cp -rn "$lib_sp/aiter/"* "$lib64_sp/aiter/" 2>/dev/null || true; \
+      rm -rf "$lib_sp/aiter"; \
     fi
 
 # 6. Clone vLLM
