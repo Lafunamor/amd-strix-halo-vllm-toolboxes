@@ -330,7 +330,13 @@ def configure_and_launch(model_idx, gpu_count):
         cmd.extend(["--attention-backend", "ROCM_ATTN"])
     else:
         cmd.extend(["--attention-backend", "TRITON_ATTN"])
-        
+
+    # ViT attention on gfx1151: the default falls to TORCH_SDPA (flash_attn's
+    # Triton-AMD subpackage isn't available) which produces NaN/Inf embeddings
+    # and collapses the LM into an endless '!' stream. TRITON_ATTN uses vLLM's
+    # own Triton ViT wrapper and is numerically healthy. No-op for LM-only.
+    cmd.extend(["--mm-encoder-attn-backend", "TRITON_ATTN"])
+
     
     print("\n" + "="*60)
     print(f" Launching: {name}")
