@@ -116,7 +116,7 @@ def setup_head_node(head_ip):
 def get_verified_config(model_id, tp_size, max_seqs):
     """Reads max_context_results.json."""
     default_config = {
-        "ctx": 8192,
+        "ctx": "auto",
         "util": 0.90
     }
     

@@ -55,41 +55,8 @@ def detect_gpus():
 
 def get_discovered_models():
     """
-    Overrides the hardcoded MODELS_TO_RUN by looking at what we actually have results for.
-    This allows the UI to show all verified models, not just what's enabled for benchmarking.
+    Returns all models defined in models.py that are compatible with the current hardware constraints.
     """
-    try:
-        if RESULTS_FILE.exists():
-            with open(RESULTS_FILE, "r") as f:
-                data = json.load(f)
-                
-            # 1. Find all models with at least one success
-            verified_models = set()
-            for r in data:
-                if r.get("status") == "success":
-                    verified_models.add(r["model"])
-            
-            # 2. Filter: Must be in MODEL_TABLE (so we have config/valid_tp)
-            #    and must be in our verified list (if results exist)
-            final_list = []
-            gpu_count = detect_gpus()
-            
-            for m in sorted(list(verified_models)):
-                if m in MODEL_TABLE:
-                    # Check valid_tp
-                    valid_tps = MODEL_TABLE[m].get("valid_tp", [1])
-                    min_required = min(valid_tps)
-                    
-                    if min_required <= gpu_count:
-                        final_list.append(m)
-                    
-            if final_list:
-                return final_list
-            
-    except Exception as e:
-        print(f"Warning: Model discovery failed ({e}). Using default list.")
-        
-    # Fallback if no results file or error: return all models compatible with current hardware
     gpu_count = detect_gpus()
     compatible_models = []
     
@@ -116,7 +83,7 @@ def get_verified_config(model_id, tp_size, max_seqs):
     Returns dict: {'ctx': int, 'util': float}
     """
     default_config = {
-        "ctx": 8192,
+        "ctx": "auto",
         "util": 0.90 # Safe default
     }
     
