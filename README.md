@@ -43,19 +43,19 @@ This is a hobby project maintained in my spare time. If you find these toolboxes
 
 View full benchmarks at: [https://kyuz0.github.io/amd-strix-halo-vllm-toolboxes/](https://kyuz0.github.io/amd-strix-halo-vllm-toolboxes/)
 
-**Table Key:** Cell values represent `Max Context Length (GPU Memory Utilization)`.
-
-| Model | TP | 1 Req | 4 Reqs | 8 Reqs | 16 Reqs |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **`meta-llama/Meta-Llama-3.1-8B-Instruct`** | 1 | 128k (0.95) | 128k (0.95) | 128k (0.95) | 128k (0.95) |
-| **`google/gemma-3-12b-it`** | 1 | 128k (0.95) | 128k (0.95) | 128k (0.95) | 128k (0.95) |
-| **`openai/gpt-oss-20b`** | 1 | 128k (0.95) | 128k (0.95) | 128k (0.95) | 128k (0.95) |
-| **`Qwen/Qwen3-14B-AWQ`** | 1 | 40k (0.95) | 40k (0.95) | 40k (0.95) | 40k (0.95) |
-| **`btbtyler09/Qwen3-Coder-30B-A3B-Instruct-gptq-4bit`** | 1 | 256k (0.95) | 256k (0.95) | 256k (0.95) | 256k (0.95) |
-| **`btbtyler09/Qwen3-Coder-30B-A3B-Instruct-gptq-8bit`** | 1 | 256k (0.95) | 256k (0.95) | 256k (0.95) | 256k (0.95) |
-| **`dazipe/Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16`** | 1 | 256k (0.95) | 256k (0.95) | 256k (0.95) | 256k (0.95) |
-| **`openai/gpt-oss-120b`** | 1 | 128k (0.95) | 128k (0.95) | 128k (0.95) | 128k (0.95) |
-| **`zai-org/GLM-4.7-Flash`** | 1 | 198k (0.95) | 198k (0.95) | 198k (0.95) | 198k (0.95) |
+| Model | Params / Quant | GPU Requirement |
+| :--- | :--- | :--- |
+| [`meta-llama/Meta-Llama-3.1-8B-Instruct`](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct) | 8B / BF16 | 1 GPU (TP=1, 2) |
+| [`google/gemma-4-26B-A4B-it`](https://huggingface.co/google/gemma-4-26B-A4B-it) | 26B / BF16 | 1 GPU (TP=1, 2) |
+| [`google/gemma-4-31B-it`](https://huggingface.co/google/gemma-4-31B-it) | 31B / BF16 | 1 GPU (TP=1, 2) |
+| [`openai/gpt-oss-20b`](https://huggingface.co/openai/gpt-oss-20b) | 20B / BF16 | 1 GPU (TP=1, 2) |
+| [`openai/gpt-oss-120b`](https://huggingface.co/openai/gpt-oss-120b) | 120B / BF16 | 1 GPU (TP=1) |
+| [`Qwen/Qwen3.6-35B-A3B`](https://huggingface.co/Qwen/Qwen3.6-35B-A3B) | 35B / BF16 | 1 GPU (TP=1) |
+| [`cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit`](https://huggingface.co/cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit) | 35B / AWQ 4-bit | 1 GPU (TP=1) |
+| [`cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit`](https://huggingface.co/cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit) | 122B / AWQ 4-bit | 1 GPU (TP=1, 2) |
+| [`cyankiwi/Qwen3.5-122B-A10B-AWQ-8bit`](https://huggingface.co/cyankiwi/Qwen3.5-122B-A10B-AWQ-8bit) | 122B / AWQ 8-bit | **2 GPUs (TP=2 Only)** |
+| [`zai-org/GLM-4.7-Flash`](https://huggingface.co/zai-org/GLM-4.7-Flash) | N/A / BF16 | 1 GPU (TP=1, 2) |
+| [`cyankiwi/MiniMax-M2.7-AWQ-4bit`](https://huggingface.co/cyankiwi/MiniMax-M2.7-AWQ-4bit) | N/A / AWQ 4-bit | **2 GPUs (TP=2 Only)** |
 
 
 ---
