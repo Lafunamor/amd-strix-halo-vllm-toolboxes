@@ -8,11 +8,11 @@ from pathlib import Path
 
 # Config
 SCRIPT_DIR = Path(__file__).parent.resolve()
-RESULTS_DIR = SCRIPT_DIR.parent / "benchmarks"
+RESULTS_DIR = SCRIPT_DIR.parent / "benchmarks" / "vllm_benchmark_results"
 BENCHMARK_SOURCES = {
-    "Triton": RESULTS_DIR / "benchmark_results",
-    "ROCm": RESULTS_DIR / "benchmark_results_rocm",
-    "AITER": RESULTS_DIR / "benchmark_results_aiter"
+    "Triton": RESULTS_DIR / "triton",
+    "ROCm": RESULTS_DIR / "rocm",
+    "AITER": RESULTS_DIR / "aiter"
 }
 OUTPUT_FILE = SCRIPT_DIR / "results.json"
 

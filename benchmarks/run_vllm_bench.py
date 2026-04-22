@@ -198,17 +198,17 @@ def print_summary(tps):
             prefix = f"{msafe}_tp{tp}"
             
             tags = set()
-            for p in RESULTS_DIR.glob(f"{prefix}*_throughput.json"):
+            for p in (RESULTS_DIR / "triton").glob(f"{prefix}*_throughput.json"):
                 name_part = p.name[len(prefix):-len("_throughput.json")]
                 tag = name_part.lstrip("_")
                 tags.add(tag)
                 
-            for p in (RESULTS_DIR / "benchmark_results_rocm").glob(f"{prefix}*_throughput.json"):
+            for p in (RESULTS_DIR / "rocm").glob(f"{prefix}*_throughput.json"):
                 name_part = p.name[len(prefix):-len("_throughput.json")]
                 tag = name_part.lstrip("_")
                 tags.add(tag)
                 
-            for p in (RESULTS_DIR / "benchmark_results_aiter").glob(f"{prefix}*_throughput.json"):
+            for p in (RESULTS_DIR / "aiter").glob(f"{prefix}*_throughput.json"):
                 name_part = p.name[len(prefix):-len("_throughput.json")]
                 tag = name_part.lstrip("_")
                 tags.add(tag)
@@ -221,7 +221,7 @@ def print_summary(tps):
                 
                 # Default
                 try: 
-                    p1 = RESULTS_DIR / f"{prefix}{tag_suffix}_throughput.json"
+                    p1 = (RESULTS_DIR / "triton") / f"{prefix}{tag_suffix}_throughput.json"
                     if p1.exists():
                         d1 = json.loads(p1.read_text())
                         val1 = f"{d1.get('tokens_per_second', 0):.1f}"
@@ -231,7 +231,7 @@ def print_summary(tps):
                 
                 # ROCm
                 try:
-                    p2 = (RESULTS_DIR / "benchmark_results_rocm") / f"{prefix}{tag_suffix}_throughput.json"
+                    p2 = (RESULTS_DIR / "rocm") / f"{prefix}{tag_suffix}_throughput.json"
                     if p2.exists():
                         d2 = json.loads(p2.read_text())
                         val2 = f"{d2.get('tokens_per_second', 0):.1f}"
@@ -241,7 +241,7 @@ def print_summary(tps):
 
                 # AITER
                 try:
-                    p3 = (RESULTS_DIR / "benchmark_results_aiter") / f"{prefix}{tag_suffix}_throughput.json"
+                    p3 = (RESULTS_DIR / "aiter") / f"{prefix}{tag_suffix}_throughput.json"
                     if p3.exists():
                         d3 = json.loads(p3.read_text())
                         val3 = f"{d3.get('tokens_per_second', 0):.1f}"
@@ -341,18 +341,18 @@ if __name__ == "__main__":
                     overrides["tag"] = lines[4].strip()
             
             # 1. Triton Attention (explicit)
-            run_throughput(m, tp, "Triton-Attn", RESULTS_DIR, overrides=overrides)
+            run_throughput(m, tp, "Triton-Attn", RESULTS_DIR / "triton", overrides=overrides)
             
             # 2. ROCm Attention 
             # We force this via CLI argument --attention-backend ROCM_ATTN below
             # No specific env vars needed if forcing backend.
             rocm_env = {}
             print(f"[DEBUG] Forcing ROCm Env: {rocm_env} + CLI: --attention-backend ROCM_ATTN")
-            run_throughput(m, tp, "ROCm-Attn", RESULTS_DIR / "benchmark_results_rocm", rocm_env, overrides=overrides)
+            run_throughput(m, tp, "ROCm-Attn", RESULTS_DIR / "rocm", rocm_env, overrides=overrides)
             
             # 3. AITER Attention
             aiter_env = {"VLLM_ROCM_USE_AITER": "1"}
             print(f"[DEBUG] Forcing AITER Env: {aiter_env} + CLI: --attention-backend ROCM_ATTN")
-            run_throughput(m, tp, "AITER-Attn", RESULTS_DIR / "benchmark_results_aiter", aiter_env, overrides=overrides)
+            run_throughput(m, tp, "AITER-Attn", RESULTS_DIR / "aiter", aiter_env, overrides=overrides)
             
     print_summary(valid_tp_args)
