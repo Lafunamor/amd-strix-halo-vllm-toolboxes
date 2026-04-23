@@ -165,8 +165,8 @@ def get_cluster_env():
 def get_model_args(model, overrides=None):
     config = MODEL_TABLE.get(model, {})
     overrides = overrides or {}
-    util = overrides.get("gpu_util", GPU_UTIL)
-    max_seq_override = overrides.get("max_num_seqs", "16")
+    util = overrides.get("gpu_util", config.get("gpu_util", GPU_UTIL))
+    max_seq_override = overrides.get("max_num_seqs", config.get("max_num_seqs", "16"))
 
     cmd = [
         "--model", model,
@@ -210,7 +210,7 @@ def run_bench_set(model, backend_name, output_dir, extra_env=None, overrides=Non
     dataset_path = get_dataset()
     dataset_args = ["--dataset-name", "sharegpt", "--dataset-path", dataset_path] if dataset_path else ["--input-len", "1024"]
     
-    batch_tokens = str(overrides.get("max_tokens", DEFAULT_BATCH_TOKENS))
+    batch_tokens = str(overrides.get("max_tokens", MODEL_TABLE.get(model, {}).get("max_tokens", DEFAULT_BATCH_TOKENS)))
 
     log(f"START {model} [TP={CLUSTER_TP} | {backend_name}]...")
     
@@ -453,9 +453,9 @@ if __name__ == "__main__":
         overrides = {}
         if args.tui:
             config = MODEL_TABLE.get(m, {})
-            default_seqs = "16"
-            default_tokens = DEFAULT_BATCH_TOKENS
-            default_util = GPU_UTIL
+            default_seqs = config.get("max_num_seqs", "16")
+            default_tokens = config.get("max_tokens", DEFAULT_BATCH_TOKENS)
+            default_util = config.get("gpu_util", GPU_UTIL)
             default_ctx = "auto"
             
             form_args = [
