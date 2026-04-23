@@ -1,6 +1,22 @@
 {
   "runs": [
     {
+      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+      "model_clean": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+      "env": "TP1",
+      "gpu_config": "single",
+      "quant": "BF16",
+      "params_b": 8.0,
+      "name_params_b": 8.0,
+      "backend": "Triton",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 1,
+      "tps_mean": 388.17289157493997
+    },
+    {
       "model": "google/gemma-4-26B-A4B-it",
       "model_clean": "google/gemma-4-26B-A4B-it",
       "env": "TP1",
@@ -14,23 +30,7 @@
       "error": false,
       "test": "Throughput",
       "tp": 1,
-      "tps_mean": 154.46308467801518
-    },
-    {
-      "model": "google/gemma-4-31B-it",
-      "model_clean": "google/gemma-4-31B-it",
-      "env": "TP1",
-      "gpu_config": "single",
-      "quant": "BF16",
-      "params_b": 31.0,
-      "name_params_b": 31.0,
-      "backend": "Triton",
-      "network": "RoCE",
-      "tag": "",
-      "error": false,
-      "test": "Throughput",
-      "tp": 1,
-      "tps_mean": 49.71531285468602
+      "tps_mean": 234.87839616872728
     },
     {
       "model": "openai/gpt-oss-20b",
@@ -46,7 +46,7 @@
       "error": false,
       "test": "Throughput",
       "tp": 1,
-      "tps_mean": 171.31472030749669
+      "tps_mean": 438.66430646016215
     },
     {
       "model": "openai/gpt-oss-120b",
@@ -62,7 +62,39 @@
       "error": false,
       "test": "Throughput",
       "tp": 1,
-      "tps_mean": 75.17796210501562
+      "tps_mean": 124.55738845194603
+    },
+    {
+      "model": "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit",
+      "model_clean": "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit",
+      "env": "TP1",
+      "gpu_config": "single",
+      "quant": "AWQ",
+      "params_b": 35.0,
+      "name_params_b": 35.0,
+      "backend": "Triton",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 1,
+      "tps_mean": 181.07612384996258
+    },
+    {
+      "model": "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit",
+      "model_clean": "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit",
+      "env": "TP1",
+      "gpu_config": "single",
+      "quant": "AWQ",
+      "params_b": 122.0,
+      "name_params_b": 122.0,
+      "backend": "Triton",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 1,
+      "tps_mean": 58.414328210603436
     },
     {
       "model": "Qwen/Qwen3.6-35B-A3B",
@@ -78,39 +110,23 @@
       "error": false,
       "test": "Throughput",
       "tp": 1,
-      "tps_mean": 92.1323327068791
+      "tps_mean": 180.12670902901948
     },
     {
-      "model": "Qwen/Qwen3.6-35B-A3B",
-      "model_clean": "Qwen/Qwen3.6-35B-A3B",
+      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+      "model_clean": "meta-llama/Meta-Llama-3.1-8B-Instruct",
       "env": "TP2",
       "gpu_config": "dual",
       "quant": "BF16",
-      "params_b": 35.0,
-      "name_params_b": 35.0,
+      "params_b": 8.0,
+      "name_params_b": 8.0,
       "backend": "Triton",
       "network": "RoCE",
       "tag": "",
       "error": false,
       "test": "Throughput",
       "tp": 2,
-      "tps_mean": 135.21432080477098
-    },
-    {
-      "model": "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit",
-      "model_clean": "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit",
-      "env": "TP2",
-      "gpu_config": "dual",
-      "quant": "AWQ",
-      "params_b": 35.0,
-      "name_params_b": 35.0,
-      "backend": "Triton",
-      "network": "RoCE",
-      "tag": "",
-      "error": false,
-      "test": "Throughput",
-      "tp": 2,
-      "tps_mean": 96.7916361783666
+      "tps_mean": 344.89278082211166
     },
     {
       "model": "google/gemma-4-26B-A4B-it",
@@ -126,7 +142,7 @@
       "error": false,
       "test": "Throughput",
       "tp": 2,
-      "tps_mean": 239.913845111165
+      "tps_mean": 257.5690200762557
     },
     {
       "model": "google/gemma-4-31B-it",
@@ -142,23 +158,7 @@
       "error": false,
       "test": "Throughput",
       "tp": 2,
-      "tps_mean": 82.04965019123759
-    },
-    {
-      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-      "model_clean": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-      "env": "TP2",
-      "gpu_config": "dual",
-      "quant": "BF16",
-      "params_b": 8.0,
-      "name_params_b": 8.0,
-      "backend": "Triton",
-      "network": "RoCE",
-      "tag": "",
-      "error": false,
-      "test": "Throughput",
-      "tp": 2,
-      "tps_mean": 321.2550236542975
+      "tps_mean": 91.97603574035672
     },
     {
       "model": "openai/gpt-oss-20b",
@@ -174,7 +174,55 @@
       "error": false,
       "test": "Throughput",
       "tp": 2,
-      "tps_mean": 279.7972744640588
+      "tps_mean": 284.65396699184805
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "model_clean": "openai/gpt-oss-120b",
+      "env": "TP2",
+      "gpu_config": "dual",
+      "quant": "BF16",
+      "params_b": 120.0,
+      "name_params_b": 120.0,
+      "backend": "Triton",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 2,
+      "tps_mean": 126.92772572895245
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B",
+      "model_clean": "Qwen/Qwen3.6-35B-A3B",
+      "env": "TP2",
+      "gpu_config": "dual",
+      "quant": "BF16",
+      "params_b": 35.0,
+      "name_params_b": 35.0,
+      "backend": "Triton",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 2,
+      "tps_mean": 142.55665562499195
+    },
+    {
+      "model": "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit",
+      "model_clean": "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit",
+      "env": "TP2",
+      "gpu_config": "dual",
+      "quant": "AWQ",
+      "params_b": 35.0,
+      "name_params_b": 35.0,
+      "backend": "Triton",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 2,
+      "tps_mean": 132.8586044423282
     },
     {
       "model": "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit",
@@ -190,7 +238,7 @@
       "error": false,
       "test": "Throughput",
       "tp": 2,
-      "tps_mean": 60.01475407094367
+      "tps_mean": 56.83567737920783
     },
     {
       "model": "cyankiwi/Qwen3.5-122B-A10B-AWQ-8bit",
@@ -206,7 +254,7 @@
       "error": false,
       "test": "Throughput",
       "tp": 2,
-      "tps_mean": 34.465259203840304
+      "tps_mean": 33.6232356327839
     },
     {
       "model": "cyankiwi/MiniMax-M2.7-AWQ-4bit",
@@ -222,7 +270,7 @@
       "error": false,
       "test": "Throughput",
       "tp": 2,
-      "tps_mean": 35.69031996011457
+      "tps_mean": 29.646588550075137
     },
     {
       "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
@@ -232,13 +280,45 @@
       "quant": "BF16",
       "params_b": 8.0,
       "name_params_b": 8.0,
-      "backend": "Triton",
+      "backend": "ROCm",
       "network": "RoCE",
       "tag": "",
       "error": false,
       "test": "Throughput",
       "tp": 1,
-      "tps_mean": 389.33979653795194
+      "tps_mean": 431.684497031731
+    },
+    {
+      "model": "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit",
+      "model_clean": "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit",
+      "env": "TP1",
+      "gpu_config": "single",
+      "quant": "AWQ",
+      "params_b": 35.0,
+      "name_params_b": 35.0,
+      "backend": "ROCm",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 1,
+      "tps_mean": 178.9855778839184
+    },
+    {
+      "model": "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit",
+      "model_clean": "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit",
+      "env": "TP1",
+      "gpu_config": "single",
+      "quant": "AWQ",
+      "params_b": 122.0,
+      "name_params_b": 122.0,
+      "backend": "ROCm",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 1,
+      "tps_mean": 57.46672709982597
     },
     {
       "model": "Qwen/Qwen3.6-35B-A3B",
@@ -254,7 +334,23 @@
       "error": false,
       "test": "Throughput",
       "tp": 1,
-      "tps_mean": 90.75551068764864
+      "tps_mean": 177.89010792397008
+    },
+    {
+      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+      "model_clean": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+      "env": "TP2",
+      "gpu_config": "dual",
+      "quant": "BF16",
+      "params_b": 8.0,
+      "name_params_b": 8.0,
+      "backend": "ROCm",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 2,
+      "tps_mean": 339.7725769203256
     },
     {
       "model": "Qwen/Qwen3.6-35B-A3B",
@@ -270,55 +366,7 @@
       "error": false,
       "test": "Throughput",
       "tp": 2,
-      "tps_mean": 135.89715444314092
-    },
-    {
-      "model": "cyankiwi/MiniMax-M2.7-AWQ-4bit",
-      "model_clean": "cyankiwi/MiniMax-M2.7-AWQ-4bit",
-      "env": "TP2",
-      "gpu_config": "dual",
-      "quant": "AWQ",
-      "params_b": 4.0,
-      "name_params_b": 4.0,
-      "backend": "ROCm",
-      "network": "RoCE",
-      "tag": "",
-      "error": false,
-      "test": "Throughput",
-      "tp": 2,
-      "tps_mean": 35.23928185540261
-    },
-    {
-      "model": "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit",
-      "model_clean": "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit",
-      "env": "TP2",
-      "gpu_config": "dual",
-      "quant": "AWQ",
-      "params_b": 122.0,
-      "name_params_b": 122.0,
-      "backend": "ROCm",
-      "network": "RoCE",
-      "tag": "",
-      "error": false,
-      "test": "Throughput",
-      "tp": 2,
-      "tps_mean": 58.85670243356453
-    },
-    {
-      "model": "cyankiwi/Qwen3.5-122B-A10B-AWQ-8bit",
-      "model_clean": "cyankiwi/Qwen3.5-122B-A10B-AWQ-8bit",
-      "env": "TP2",
-      "gpu_config": "dual",
-      "quant": "AWQ",
-      "params_b": 122.0,
-      "name_params_b": 122.0,
-      "backend": "ROCm",
-      "network": "RoCE",
-      "tag": "",
-      "error": false,
-      "test": "Throughput",
-      "tp": 2,
-      "tps_mean": 34.25049976603416
+      "tps_mean": 139.42518701418686
     },
     {
       "model": "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit",
@@ -334,87 +382,7 @@
       "error": false,
       "test": "Throughput",
       "tp": 2,
-      "tps_mean": 129.64315001529454
-    },
-    {
-      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-      "model_clean": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-      "env": "TP2",
-      "gpu_config": "dual",
-      "quant": "BF16",
-      "params_b": 8.0,
-      "name_params_b": 8.0,
-      "backend": "ROCm",
-      "network": "RoCE",
-      "tag": "",
-      "error": false,
-      "test": "Throughput",
-      "tp": 2,
-      "tps_mean": 320.11245003485686
-    },
-    {
-      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-      "model_clean": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-      "env": "TP1",
-      "gpu_config": "single",
-      "quant": "BF16",
-      "params_b": 8.0,
-      "name_params_b": 8.0,
-      "backend": "ROCm",
-      "network": "RoCE",
-      "tag": "",
-      "error": false,
-      "test": "Throughput",
-      "tp": 1,
-      "tps_mean": 435.37720701895637
-    },
-    {
-      "model": "Qwen/Qwen3.6-35B-A3B",
-      "model_clean": "Qwen/Qwen3.6-35B-A3B",
-      "env": "TP1",
-      "gpu_config": "single",
-      "quant": "BF16",
-      "params_b": 35.0,
-      "name_params_b": 35.0,
-      "backend": "AITER",
-      "network": "RoCE",
-      "tag": "",
-      "error": false,
-      "test": "Throughput",
-      "tp": 1,
-      "tps_mean": 90.86498850272652
-    },
-    {
-      "model": "Qwen/Qwen3.6-35B-A3B",
-      "model_clean": "Qwen/Qwen3.6-35B-A3B",
-      "env": "TP2",
-      "gpu_config": "dual",
-      "quant": "BF16",
-      "params_b": 35.0,
-      "name_params_b": 35.0,
-      "backend": "AITER",
-      "network": "RoCE",
-      "tag": "",
-      "error": false,
-      "test": "Throughput",
-      "tp": 2,
-      "tps_mean": 135.095929230852
-    },
-    {
-      "model": "cyankiwi/MiniMax-M2.7-AWQ-4bit",
-      "model_clean": "cyankiwi/MiniMax-M2.7-AWQ-4bit",
-      "env": "TP2",
-      "gpu_config": "dual",
-      "quant": "AWQ",
-      "params_b": 4.0,
-      "name_params_b": 4.0,
-      "backend": "AITER",
-      "network": "RoCE",
-      "tag": "",
-      "error": false,
-      "test": "Throughput",
-      "tp": 2,
-      "tps_mean": 35.211952499376785
+      "tps_mean": 129.6957189424105
     },
     {
       "model": "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit",
@@ -424,13 +392,13 @@
       "quant": "AWQ",
       "params_b": 122.0,
       "name_params_b": 122.0,
-      "backend": "AITER",
+      "backend": "ROCm",
       "network": "RoCE",
       "tag": "",
       "error": false,
       "test": "Throughput",
       "tp": 2,
-      "tps_mean": 58.65906894240294
+      "tps_mean": 55.96861256717984
     },
     {
       "model": "cyankiwi/Qwen3.5-122B-A10B-AWQ-8bit",
@@ -440,13 +408,125 @@
       "quant": "AWQ",
       "params_b": 122.0,
       "name_params_b": 122.0,
+      "backend": "ROCm",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 2,
+      "tps_mean": 33.262528698709545
+    },
+    {
+      "model": "cyankiwi/MiniMax-M2.7-AWQ-4bit",
+      "model_clean": "cyankiwi/MiniMax-M2.7-AWQ-4bit",
+      "env": "TP2",
+      "gpu_config": "dual",
+      "quant": "AWQ",
+      "params_b": 4.0,
+      "name_params_b": 4.0,
+      "backend": "ROCm",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 2,
+      "tps_mean": 32.38168396270398
+    },
+    {
+      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+      "model_clean": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+      "env": "TP1",
+      "gpu_config": "single",
+      "quant": "BF16",
+      "params_b": 8.0,
+      "name_params_b": 8.0,
+      "backend": "AITER",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 1,
+      "tps_mean": 435.4258110188379
+    },
+    {
+      "model": "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit",
+      "model_clean": "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit",
+      "env": "TP1",
+      "gpu_config": "single",
+      "quant": "AWQ",
+      "params_b": 35.0,
+      "name_params_b": 35.0,
+      "backend": "AITER",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 1,
+      "tps_mean": 178.44770214579268
+    },
+    {
+      "model": "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit",
+      "model_clean": "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit",
+      "env": "TP1",
+      "gpu_config": "single",
+      "quant": "AWQ",
+      "params_b": 122.0,
+      "name_params_b": 122.0,
+      "backend": "AITER",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 1,
+      "tps_mean": 57.475542002235684
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B",
+      "model_clean": "Qwen/Qwen3.6-35B-A3B",
+      "env": "TP1",
+      "gpu_config": "single",
+      "quant": "BF16",
+      "params_b": 35.0,
+      "name_params_b": 35.0,
+      "backend": "AITER",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 1,
+      "tps_mean": 177.7253361759695
+    },
+    {
+      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+      "model_clean": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+      "env": "TP2",
+      "gpu_config": "dual",
+      "quant": "BF16",
+      "params_b": 8.0,
+      "name_params_b": 8.0,
       "backend": "AITER",
       "network": "RoCE",
       "tag": "",
       "error": false,
       "test": "Throughput",
       "tp": 2,
-      "tps_mean": 34.247707131339034
+      "tps_mean": 341.7717278052596
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B",
+      "model_clean": "Qwen/Qwen3.6-35B-A3B",
+      "env": "TP2",
+      "gpu_config": "dual",
+      "quant": "BF16",
+      "params_b": 35.0,
+      "name_params_b": 35.0,
+      "backend": "AITER",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 2,
+      "tps_mean": 139.81420953728522
     },
     {
       "model": "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit",
@@ -462,39 +542,55 @@
       "error": false,
       "test": "Throughput",
       "tp": 2,
-      "tps_mean": 129.56176234818062
+      "tps_mean": 129.80786188045636
     },
     {
-      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-      "model_clean": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+      "model": "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit",
+      "model_clean": "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit",
       "env": "TP2",
       "gpu_config": "dual",
-      "quant": "BF16",
-      "params_b": 8.0,
-      "name_params_b": 8.0,
+      "quant": "AWQ",
+      "params_b": 122.0,
+      "name_params_b": 122.0,
       "backend": "AITER",
       "network": "RoCE",
       "tag": "",
       "error": false,
       "test": "Throughput",
       "tp": 2,
-      "tps_mean": 321.4178975518064
+      "tps_mean": 56.30988419127526
     },
     {
-      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-      "model_clean": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-      "env": "TP1",
-      "gpu_config": "single",
-      "quant": "BF16",
-      "params_b": 8.0,
-      "name_params_b": 8.0,
+      "model": "cyankiwi/Qwen3.5-122B-A10B-AWQ-8bit",
+      "model_clean": "cyankiwi/Qwen3.5-122B-A10B-AWQ-8bit",
+      "env": "TP2",
+      "gpu_config": "dual",
+      "quant": "AWQ",
+      "params_b": 122.0,
+      "name_params_b": 122.0,
       "backend": "AITER",
       "network": "RoCE",
       "tag": "",
       "error": false,
       "test": "Throughput",
-      "tp": 1,
-      "tps_mean": 432.307704523262
+      "tp": 2,
+      "tps_mean": 33.28311465556932
+    },
+    {
+      "model": "cyankiwi/MiniMax-M2.7-AWQ-4bit",
+      "model_clean": "cyankiwi/MiniMax-M2.7-AWQ-4bit",
+      "env": "TP2",
+      "gpu_config": "dual",
+      "quant": "AWQ",
+      "params_b": 4.0,
+      "name_params_b": 4.0,
+      "backend": "AITER",
+      "network": "RoCE",
+      "tag": "",
+      "error": false,
+      "test": "Throughput",
+      "tp": 2,
+      "tps_mean": 35.33278392379042
     }
   ]
 }
