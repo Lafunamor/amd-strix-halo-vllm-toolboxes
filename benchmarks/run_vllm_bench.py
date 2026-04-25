@@ -255,13 +255,15 @@ def print_summary(tps):
     print("-" * 103)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="VLLM High-Concurrency Throughput Benchmark Suite")
     parser.add_argument("--tp", type=int, nargs="+", default=[1])
     parser.add_argument("--tui", action="store_true", help="Launch interactive configuration UI")
     args = parser.parse_args()
     
     gpu_count = get_gpu_count()
     log(f"Detected {gpu_count} AMD GPU(s)")
+    log("NOTE: Running Peak Throughput Benchmark. This simulates high-concurrency batching to saturate hardware bandwidth.")
+    log("This does NOT represent single-request user generation speed (Concurrency=1).")
     
     valid_tp_args = [t for t in args.tp if t <= gpu_count]
     if not valid_tp_args:

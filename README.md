@@ -41,6 +41,9 @@ This is a hobby project maintained in my spare time. If you find these toolboxes
 
 ## Tested Models (Benchmarks)
 
+> [!IMPORTANT]
+> **Note on Throughput:** These benchmarks measure **Peak Multi-User Throughput** (Tokens/Second) at high concurrency (batching multiple sequences simultaneously to saturate the Strix Halo's memory bandwidth). If you are testing with a single request (Concurrency = 1), your individual generation speed will be lower than these maximum hardware-saturation numbers. These metrics represent the total capacity of the system under heavy load.
+
 View full benchmarks at: [https://kyuz0.github.io/amd-strix-halo-vllm-toolboxes/](https://kyuz0.github.io/amd-strix-halo-vllm-toolboxes/)
 
 | Model | Params / Quant | GPU Requirement |

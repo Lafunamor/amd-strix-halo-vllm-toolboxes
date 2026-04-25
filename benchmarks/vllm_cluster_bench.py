@@ -372,7 +372,7 @@ def print_summary():
     print("-" * 103)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="VLLM Cluster Benchmark")
+    parser = argparse.ArgumentParser(description="VLLM High-Concurrency Throughput Benchmark Suite (Cluster)")
     parser.add_argument("--eth-only", action="store_true", help="Run benchmark using only Ethernet (disable RDMA/RoCE)")
     parser.add_argument("--debug-nccl", action="store_true", help="Enable NCCL Debug logging (INFO level for Transport tracking)")
     parser.add_argument("--tui", action="store_true", help="Launch interactive configuration UI")
@@ -443,6 +443,8 @@ if __name__ == "__main__":
             sys.exit(0)
 
     log("Ray Cluster Detected. Starting Benchmarks (Dual Backend)...")
+    log("NOTE: Running Peak Throughput Benchmark. This simulates high-concurrency batching to saturate hardware bandwidth.")
+    log("This does NOT represent single-request user generation speed (Concurrency=1).")
     if FORCE_ETH:
         log("Note: Ethernet ONLY mode enabled. RDMA/RoCE disabled.")
     if FORCE_DEBUG_NCCL:
