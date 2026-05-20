@@ -9,3 +9,4 @@ export MIOPEN_FIND_MODE=FAST
 
 # Temporary fix for "PicklingError: Can't pickle <function launcher ...>" inside EngineCore
 export VLLM_DISABLE_COMPILE_CACHE=1
+export PYTHONNOUSERSITE=1

@@ -22,6 +22,7 @@ RUN /usr/bin/python3.12 -m venv /opt/venv
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 ENV PIP_NO_CACHE_DIR=1
+ENV PYTHONNOUSERSITE=1
 RUN printf 'source /opt/venv/bin/activate\n' > /etc/profile.d/venv.sh
 RUN python -m pip install --upgrade pip wheel packaging "setuptools<80.0.0"
 
