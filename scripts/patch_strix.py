@@ -6,6 +6,22 @@ from pathlib import Path
 def patch_vllm():
     print("Applying Strix Halo patches to vLLM (ai-notes modernization)...")
 
+    # Patch 0: csrc/spinloop.cpp (clang-compatible mwaitx include)
+    # spinloop.cpp (vLLM #36517) includes <mwaitxintrin.h> directly, which
+    # ROCm clang hard-errors on ("Never use <mwaitxintrin.h> directly;
+    # include <x86intrin.h> instead"). GCC tolerates it, so upstream CI never
+    # sees the break — but this toolbox builds with CC/CXX=ROCm clang for ABI
+    # alignment with PyTorch. <x86intrin.h> is the umbrella header accepted
+    # by both compilers. No-ops once vLLM fixes it upstream.
+    p_spinloop = Path('csrc/spinloop.cpp')
+    if p_spinloop.exists():
+        txt = p_spinloop.read_text()
+        if '#include <mwaitxintrin.h>' in txt:
+            txt = txt.replace('#include <mwaitxintrin.h>',
+                              '#include <x86intrin.h>')
+            p_spinloop.write_text(txt)
+            print(" -> Patched csrc/spinloop.cpp (mwaitxintrin.h -> x86intrin.h for clang)")
+
     # Patch 1: vllm/platforms/__init__.py (amdsmi monkey patch — PROVEN working for 5 months)
     # Comment out real amdsmi imports and replace with pass stubs.
     # The actual amdsmi library doesn't work on Strix Halo APUs in containers.
