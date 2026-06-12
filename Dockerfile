@@ -22,25 +22,57 @@ RUN /usr/bin/python3.12 -m venv /opt/venv
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 ENV PIP_NO_CACHE_DIR=1
+ENV PYTHONNOUSERSITE=1
 RUN printf 'source /opt/venv/bin/activate\n' > /etc/profile.d/venv.sh
 RUN python -m pip install --upgrade pip wheel packaging "setuptools<80.0.0"
 
 # 5. Install PyTorch (TheRock Nightly)
 RUN python -m pip install \
   --index-url https://rocm.nightlies.amd.com/v2-staging/gfx1151/ \
-  --pre torch torchaudio torchvision
+  --pre torch torchaudio torchvision && \
+  find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true && \
+  rm -rf /root/.cache/pip
 
 WORKDIR /opt
 
-# Flash-Attention
+COPY scripts/patch_aiter_headers.py /opt/patch_aiter_headers.py
+RUN python -m pip install --upgrade cmake ninja packaging wheel numpy "setuptools-scm>=8" "setuptools<80.0.0" scikit-build-core pybind11 numba scipy
+
+
+# Flash-Attention & AITER
 ENV FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE"
 ENV LD_LIBRARY_PATH="/opt/rocm/lib:/opt/rocm/lib64:$LD_LIBRARY_PATH"
 
-RUN git clone https://github.com/ROCm/flash-attention.git &&\ 
-  cd flash-attention &&\
-  git checkout main_perf &&\
-  python setup.py install && \
-  cd /opt && rm -rf /opt/flash-attention
+RUN git clone https://github.com/ROCm/flash-attention.git && \
+    cd flash-attention && \
+    git checkout main_perf && \
+    git submodule update --init third_party/aiter && \
+    cd third_party/aiter && \
+    git submodule update --init 3rdparty/composable_kernel && \
+    export CK_DIR="$(pwd)/3rdparty/composable_kernel" && \
+    python -m pip wheel --no-build-isolation --no-deps -w /tmp/dist -v . && \
+    python -m pip install --force-reinstall /tmp/dist/amd_aiter*.whl && \
+    python /opt/patch_aiter_headers.py && \
+    cd /opt/flash-attention && \
+    python -c "import re; f=open('setup.py','r'); t=f.read(); f.close(); t=re.sub(r'subprocess\.run\([\s\S]*?third_party/aiter[\s\S]*?check=True,\s*\)', 'pass # patched', t); f=open('setup.py','w'); f.write(t)" && \
+    pip install --no-build-isolation --no-deps . && \
+    cd /opt && rm -rf /opt/flash-attention /opt/patch_aiter_headers.py && \
+    find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true && \
+    rm -rf /root/.cache/pip
+
+# Fix Fedora lib vs lib64 split: setup.py install writes to lib/, pip to lib64/.
+# flash-attention's find_packages() may install a partial aiter copy into lib/.
+# Merge any straggler files from lib/ into lib64/ so Python finds everything.
+# When lib64 is a symlink to lib (Fedora's default venv layout), the two
+# site-packages dirs resolve to the same path — skip the merge, since the
+# cp-into-self then rm-rf would delete the entire aiter package.
+RUN lib_sp=/opt/venv/lib/python3.12/site-packages; \
+    lib64_sp=/opt/venv/lib64/python3.12/site-packages; \
+    if [ "$(readlink -f "$lib_sp")" != "$(readlink -f "$lib64_sp")" ] && \
+       [ -d "$lib_sp/aiter" ]; then \
+      cp -rn "$lib_sp/aiter/"* "$lib64_sp/aiter/" 2>/dev/null || true; \
+      rm -rf "$lib_sp/aiter"; \
+    fi
 
 # 6. Clone vLLM
 # Optional: pin to a specific vLLM commit for reproducible builds.
@@ -57,7 +89,6 @@ COPY scripts/patch_strix.py /opt/vllm/patch_strix.py
 RUN python /opt/vllm/patch_strix.py
 
 # 7. Build vLLM (Wheel Method) with CLANG Host Compiler
-RUN python -m pip install --upgrade cmake ninja packaging wheel numpy "setuptools-scm>=8" "setuptools<80.0.0" scikit-build-core pybind11
 ENV ROCM_HOME="/opt/rocm"
 ENV HIP_PATH="/opt/rocm"
 ENV VLLM_TARGET_DEVICE="rocm"
@@ -79,7 +110,10 @@ RUN export HIP_DEVICE_LIB_PATH=$(find /opt/rocm -type d -name bitcode -print -qu
   echo "Compiling with Bitcode: $HIP_DEVICE_LIB_PATH" && \
   export CMAKE_ARGS="-DROCM_PATH=/opt/rocm -DHIP_PATH=/opt/rocm -DAMDGPU_TARGETS=gfx1151 -DHIP_ARCHITECTURES=gfx1151" && \   
   python -m pip wheel --no-build-isolation --no-deps -w /tmp/dist -v . && \
-  python -m pip install /tmp/dist/*.whl
+  python -m pip install /tmp/dist/*.whl && \
+  rm -rf /tmp/dist && \
+  find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true && \
+  rm -rf /root/.cache/pip
 
 RUN python -m pip install ray
 
@@ -101,7 +135,9 @@ RUN cmake -S . \
   -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ \
   && \
   make -j$(nproc) && \
-  python -m pip install --no-cache-dir . --no-build-isolation --no-deps
+  python -m pip install --no-cache-dir . --no-build-isolation --no-deps && \
+  find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true && \
+  rm -rf /root/.cache/pip
 
 # 8. Final Cleanup & Runtime
 WORKDIR /opt
@@ -135,5 +171,15 @@ RUN chmod +x /opt/start-vllm /opt/start-vllm-cluster /opt/vllm_cluster_bench.py 
 RUN chmod 0644 /etc/profile.d/*.sh
 RUN printf 'ulimit -S -c 0\n' > /etc/profile.d/90-nocoredump.sh && chmod 0644 /etc/profile.d/90-nocoredump.sh
 
+# 9. Install Custom RCCL (gfx1151) - Replaces standard library with manually built one
+COPY custom_libs/librccl.so.1.gz /tmp/librccl.so.1.gz
+RUN echo "Installing Custom RCCL..." && \
+  gzip -d /tmp/librccl.so.1.gz && \
+  chmod 755 /tmp/librccl.so.1 && \
+  # Replace /opt/rocm library strictly as managed_rccl_install.sh does
+  cp -fv /tmp/librccl.so.1 /opt/rocm/lib/librccl.so.1.0 && \
+  # Replace /opt/venv library
+  find /opt/venv -name "librccl.so.1" -exec cp -fv /tmp/librccl.so.1 {} + && \
+  rm /tmp/librccl.so.1
 
 CMD ["/bin/bash"]

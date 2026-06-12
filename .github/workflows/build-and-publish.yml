@@ -109,14 +109,15 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
 
-      - name: Build and push
+      - name: Build image (no push)
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
-          push: true
+          push: false
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
@@ -124,7 +125,27 @@ jobs:
           provenance: false
           sbom: false
           cache-from: type=registry,ref=docker.io/${{ env.IMAGE_REPO }}:buildcache
-          cache-to: type=registry,ref=docker.io/${{ env.IMAGE_REPO }}:buildcache,mode=max
+          cache-to: type=registry,ref=docker.io/${{ env.IMAGE_REPO }}:buildcache,mode=min,image-manifest=true,oci-mediatypes=true
+
+      - name: Push image (with retries)
+        run: |
+          set -eux
+          TAGS="${{ steps.meta.outputs.tags }}"
+          for tag in $TAGS; do
+            for attempt in 1 2 3; do
+              echo "Pushing $tag (attempt $attempt/3)..."
+              if docker push "$tag"; then
+                echo "✅ Pushed $tag"
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "❌ Failed to push $tag after 3 attempts"
+                exit 1
+              fi
+              echo "⏳ Retrying in 30s..."
+              sleep 30
+            done
+          done
 
       - name: Prune buildx cache
         if: always()

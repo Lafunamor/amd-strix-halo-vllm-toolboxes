@@ -2,6 +2,7 @@
 import sys
 import os
 import json
+import time
 import shutil
 import tempfile
 import subprocess
@@ -54,41 +55,8 @@ def detect_gpus():
 
 def get_discovered_models():
     """
-    Overrides the hardcoded MODELS_TO_RUN by looking at what we actually have results for.
-    This allows the UI to show all verified models, not just what's enabled for benchmarking.
+    Returns all models defined in models.py that are compatible with the current hardware constraints.
     """
-    try:
-        if RESULTS_FILE.exists():
-            with open(RESULTS_FILE, "r") as f:
-                data = json.load(f)
-                
-            # 1. Find all models with at least one success
-            verified_models = set()
-            for r in data:
-                if r.get("status") == "success":
-                    verified_models.add(r["model"])
-            
-            # 2. Filter: Must be in MODEL_TABLE (so we have config/valid_tp)
-            #    and must be in our verified list (if results exist)
-            final_list = []
-            gpu_count = detect_gpus()
-            
-            for m in sorted(list(verified_models)):
-                if m in MODEL_TABLE:
-                    # Check valid_tp
-                    valid_tps = MODEL_TABLE[m].get("valid_tp", [1])
-                    min_required = min(valid_tps)
-                    
-                    if min_required <= gpu_count:
-                        final_list.append(m)
-                    
-            if final_list:
-                return final_list
-            
-    except Exception as e:
-        print(f"Warning: Model discovery failed ({e}). Using default list.")
-        
-    # Fallback if no results file or error: return all models compatible with current hardware
     gpu_count = detect_gpus()
     compatible_models = []
     
@@ -115,7 +83,7 @@ def get_verified_config(model_id, tp_size, max_seqs):
     Returns dict: {'ctx': int, 'util': float}
     """
     default_config = {
-        "ctx": int(MODEL_TABLE.get(model_id, {}).get("ctx", 8192)),
+        "ctx": "auto",
         "util": 0.90 # Safe default
     }
     
@@ -193,16 +161,16 @@ def configure_and_launch(model_idx, gpu_count):
     current_ctx = verified["ctx"]
     current_util = verified["util"]
     
-    clear_cache = False
+    clear_cache = True  # Default ON: stale graphs from version upgrades cause crashes
     use_eager = config.get("enforce_eager", False) # Default to model config, usually False
-    use_rocm_attn = False # Default to Triton (ROCM_ATTN has regression on gfx1151, vllm commit 189ddefbf / #36702)
+    attn_backends = ["Triton", "ROCm (CK)", "AITER"]
+    current_attn_backend = "Triton" # Default to Triton
     
     name = model_id.split("/")[-1]
     
     while True:
         cache_status = "YES" if clear_cache else "NO"
         eager_status = "YES" if use_eager else "NO"
-        attn_backend = "ROCm" if use_rocm_attn else "Triton"
         
         menu_args = [
             "--clear", "--backtitle", f"AMD Strix Halo vLLM Launcher (GPUs: {gpu_count})",
@@ -212,7 +180,7 @@ def configure_and_launch(model_idx, gpu_count):
             "2", f"Concurrent Requests:  {current_seqs}",
             "3", f"Context Length:       {current_ctx} (Verified)",
             "4", f"GPU Utilization:      {current_util} (Verified)",
-            "5", f"Attention Backend:    {attn_backend}",
+            "5", f"Attention Backend:    {current_attn_backend}",
             "6", f"Erase vLLM Cache:     {cache_status}",
             "7", f"Force Eager Mode:     {eager_status}",
             "8", "LAUNCH SERVER"
@@ -266,8 +234,9 @@ def configure_and_launch(model_idx, gpu_count):
              pass 
 
         elif choice == "5":
-            # Toggle Attention Backend
-            use_rocm_attn = not use_rocm_attn
+            # Cycle Attention Backend
+            idx = attn_backends.index(current_attn_backend)
+            current_attn_backend = attn_backends[(idx + 1) % len(attn_backends)]
 
         elif choice == "6":
             # Toggle Cache
@@ -323,18 +292,32 @@ def configure_and_launch(model_idx, gpu_count):
     # Env Vars
     env = os.environ.copy()
     env["VLLM_DISABLE_COMPILE_CACHE"] = "1"
-    env.update(config.get("env", {}))
     
-    if use_rocm_attn:
+    if current_attn_backend == "AITER":
+        env["VLLM_ROCM_USE_AITER"] = "1"
         cmd.extend(["--attention-backend", "ROCM_ATTN"])
-    else:
+    elif current_attn_backend == "ROCm (CK)":
+        if "VLLM_ROCM_USE_AITER" in env:
+            del env["VLLM_ROCM_USE_AITER"]
+        cmd.extend(["--attention-backend", "ROCM_ATTN"])
+    else: # Triton
+        if "VLLM_ROCM_USE_AITER" in env:
+            del env["VLLM_ROCM_USE_AITER"]
         cmd.extend(["--attention-backend", "TRITON_ATTN"])
-        
+
+    env.update(config.get("env", {}))
+
+    # ViT attention on gfx1151: the default falls to TORCH_SDPA (flash_attn's
+    # Triton-AMD subpackage isn't available) which produces NaN/Inf embeddings
+    # and collapses the LM into an endless '!' stream. TRITON_ATTN uses vLLM's
+    # own Triton ViT wrapper and is numerically healthy. No-op for LM-only.
+    cmd.extend(["--mm-encoder-attn-backend", "TRITON_ATTN"])
+
     
     print("\n" + "="*60)
     print(f" Launching: {name}")
     print(f" Config:    TP={current_tp} | Seqs={current_seqs} | Ctx={current_ctx} | Util={current_util}")
-    print(f" Backend:   {'ROCm' if use_rocm_attn else 'Triton'}")
+    print(f" Backend:   {current_attn_backend}")
     if clear_cache:
         print(f" Action:    Clearing vLLM Cache (~/.cache/vllm)")
         

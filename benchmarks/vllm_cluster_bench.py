@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import subprocess, time, json, sys, os, requests, argparse, re
+import subprocess, time, json, sys, os, requests, argparse, re, shutil
 from pathlib import Path
 
 try:
@@ -37,8 +37,8 @@ OFF_NUM_PROMPTS      = models.OFF_NUM_PROMPTS
 OFF_FORCED_OUTPUT    = models.OFF_FORCED_OUTPUT
 DEFAULT_BATCH_TOKENS = models.DEFAULT_BATCH_TOKENS
 
-RESULTS_DIR = Path("benchmark_results")
-RESULTS_DIR.mkdir(exist_ok=True)
+RESULTS_DIR = Path("~/vllm_benchmark_results").expanduser()
+RESULTS_DIR.mkdir(exist_ok=True, parents=True)
 
 # Reuse the model table from the main benchmark script
 # We can just import it or copy it. Importing is cleaner but might rely on path.
@@ -163,10 +163,10 @@ def get_cluster_env():
     return env
 
 def get_model_args(model, overrides=None):
-    config = MODEL_TABLE.get(model, {"max_num_seqs": "32"})
+    config = MODEL_TABLE.get(model, {})
     overrides = overrides or {}
     util = overrides.get("gpu_util", config.get("gpu_util", GPU_UTIL))
-    max_seq_override = overrides.get("max_num_seqs", config.get("max_num_seqs", "32"))
+    max_seq_override = overrides.get("max_num_seqs", config.get("max_num_seqs", "16"))
 
     cmd = [
         "--model", model,
@@ -178,8 +178,8 @@ def get_model_args(model, overrides=None):
     ]
     
     # Optional ctx
-    if "ctx" in overrides or "ctx" in config:
-        cmd.extend(["--max-model-len", str(overrides.get("ctx", config.get("ctx")))])
+    if "ctx" in overrides:
+        cmd.extend(["--max-model-len", str(overrides.get("ctx"))])
         
     if config.get("trust_remote"): cmd.append("--trust-remote-code")
     
@@ -216,7 +216,8 @@ def run_bench_set(model, backend_name, output_dir, extra_env=None, overrides=Non
     
     nuke_vllm_cache()
 
-    cmd = ["vllm", "bench", "throughput"] + get_model_args(model, overrides)
+    vllm_path = shutil.which("vllm") or "vllm"
+    cmd = ["python", "-W", "ignore", vllm_path, "bench", "throughput"] + get_model_args(model, overrides)
     cmd.extend([
         "--num-prompts", str(OFF_NUM_PROMPTS),
         "--max-num-batched-tokens", batch_tokens,
@@ -226,8 +227,15 @@ def run_bench_set(model, backend_name, output_dir, extra_env=None, overrides=Non
     ])
     cmd.extend(dataset_args)
 
-    if backend_name == "ROCm-Attn":
+    # Explicitly set Attention Backend for every run
+    if backend_name == "AITER-Attn":
         cmd.extend(["--attention-backend", "ROCM_ATTN"])
+    elif backend_name == "ROCm-Attn":
+        cmd.extend(["--attention-backend", "ROCM_ATTN"])
+    else:
+        cmd.extend(["--attention-backend", "TRITON_ATTN"])
+
+    cmd.extend(["--mm-encoder-attn-backend", "TRITON_ATTN"])
 
     env = get_cluster_env()
     
@@ -251,28 +259,41 @@ def run_cluster_throughput(model, overrides=None):
     overrides = overrides or {}
     tag = overrides.get("tag", "").strip()
     
-    # 1. Default Run (Triton)
-    if get_benchmark_output_file(model, RESULTS_DIR, tag).exists():
-        log(f"SKIP {model} [Default] (Result exists)")
+    # 1. Triton Attention (explicit)
+    if get_benchmark_output_file(model, RESULTS_DIR / "triton", tag).exists():
+        log(f"SKIP {model} [Triton-Attn] (Result exists)")
     else:
         restart_cluster()
         run_bench_set(
             model, 
-            "Default", 
-            RESULTS_DIR,
+            "Triton-Attn", 
+            RESULTS_DIR / "triton",
             overrides=overrides
         )
     
     # 2. ROCm Attention Run
-    if get_benchmark_output_file(model, "benchmark_results_rocm", tag).exists():
+    if get_benchmark_output_file(model, RESULTS_DIR / "rocm", tag).exists():
         log(f"SKIP {model} [ROCm-Attn] (Result exists)")
     else:
         restart_cluster()
         run_bench_set(
             model,
             "ROCm-Attn",
-            "benchmark_results_rocm",
+            RESULTS_DIR / "rocm",
             extra_env={},
+            overrides=overrides
+        )
+
+    # 3. AITER Attention Run
+    if get_benchmark_output_file(model, RESULTS_DIR / "aiter", tag).exists():
+        log(f"SKIP {model} [AITER-Attn] (Result exists)")
+    else:
+        restart_cluster()
+        run_bench_set(
+            model,
+            "AITER-Attn",
+            RESULTS_DIR / "aiter",
+            extra_env={"VLLM_ROCM_USE_AITER": "1"},
             overrides=overrides
         )
 
@@ -280,8 +301,8 @@ def run_cluster_throughput(model, overrides=None):
 def print_summary():
     eth_suffix = "_eth" if FORCE_ETH else ""
     title_suffix = " (Ethernet ONLY)" if FORCE_ETH else ""
-    print(f"\n{f'MODEL (TP={CLUSTER_TP}){title_suffix}':<50} | {'Tag':<15} | {'Triton':<8} | {'ROCm':<8}")
-    print("-" * 92)
+    print(f"\n{f'MODEL (TP={CLUSTER_TP}){title_suffix}':<50} | {'Tag':<15} | {'Triton':<8} | {'ROCm':<8} | {'AITER':<8}")
+    print("-" * 103)
     
     for m in MODELS_TO_RUN:
         msafe = m.replace("/", "_")
@@ -292,13 +313,18 @@ def print_summary():
         
         # Gather all unique tags from both directories
         tags = set()
-        for p in RESULTS_DIR.glob(f"{prefix}*_throughput.json"):
+        for p in (RESULTS_DIR / "triton").glob(f"{prefix}*_throughput.json"):
             # Extract tag: {prefix}_{tag}_throughput.json or {prefix}_throughput.json
             name_part = p.name[len(prefix):-len("_throughput.json")]
             tag = name_part.lstrip("_")
             tags.add(tag)
             
-        for p in Path("benchmark_results_rocm").glob(f"{prefix}*_throughput.json"):
+        for p in (RESULTS_DIR / "rocm").glob(f"{prefix}*_throughput.json"):
+            name_part = p.name[len(prefix):-len("_throughput.json")]
+            tag = name_part.lstrip("_")
+            tags.add(tag)
+            
+        for p in (RESULTS_DIR / "aiter").glob(f"{prefix}*_throughput.json"):
             name_part = p.name[len(prefix):-len("_throughput.json")]
             tag = name_part.lstrip("_")
             tags.add(tag)
@@ -312,7 +338,7 @@ def print_summary():
             
             # Default (Triton)
             try: 
-                p1 = RESULTS_DIR / f"{prefix}{tag_suffix}_throughput.json"
+                p1 = (RESULTS_DIR / "triton") / f"{prefix}{tag_suffix}_throughput.json"
                 if p1.exists():
                     d1 = json.loads(p1.read_text())
                     val1 = f"{d1.get('tokens_per_second', 0):.1f}"
@@ -322,7 +348,7 @@ def print_summary():
             
             # ROCm
             try:
-                p2 = Path("benchmark_results_rocm") / f"{prefix}{tag_suffix}_throughput.json"
+                p2 = (RESULTS_DIR / "rocm") / f"{prefix}{tag_suffix}_throughput.json"
                 if p2.exists():
                     d2 = json.loads(p2.read_text())
                     val2 = f"{d2.get('tokens_per_second', 0):.1f}"
@@ -330,13 +356,23 @@ def print_summary():
                     val2 = "N/A"
             except: val2 = "N/A"
 
+            # AITER
+            try:
+                p3 = (RESULTS_DIR / "aiter") / f"{prefix}{tag_suffix}_throughput.json"
+                if p3.exists():
+                    d3 = json.loads(p3.read_text())
+                    val3 = f"{d3.get('tokens_per_second', 0):.1f}"
+                else:
+                    val3 = "N/A"
+            except: val3 = "N/A"
+
             display_tag = tag if tag else "(Default)"
-            print(f"{name_cell:<50} | {display_tag:<15} | {val1:<8} | {val2:<8}")
+            print(f"{name_cell:<50} | {display_tag:<15} | {val1:<8} | {val2:<8} | {val3:<8}")
             
-    print("-" * 92)
+    print("-" * 103)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="VLLM Cluster Benchmark")
+    parser = argparse.ArgumentParser(description="VLLM High-Concurrency Throughput Benchmark Suite (Cluster)")
     parser.add_argument("--eth-only", action="store_true", help="Run benchmark using only Ethernet (disable RDMA/RoCE)")
     parser.add_argument("--debug-nccl", action="store_true", help="Enable NCCL Debug logging (INFO level for Transport tracking)")
     parser.add_argument("--tui", action="store_true", help="Launch interactive configuration UI")
@@ -407,6 +443,8 @@ if __name__ == "__main__":
             sys.exit(0)
 
     log("Ray Cluster Detected. Starting Benchmarks (Dual Backend)...")
+    log("NOTE: Running Peak Throughput Benchmark. This simulates high-concurrency batching to saturate hardware bandwidth.")
+    log("This does NOT represent single-request user generation speed (Concurrency=1).")
     if FORCE_ETH:
         log("Note: Ethernet ONLY mode enabled. RDMA/RoCE disabled.")
     if FORCE_DEBUG_NCCL:
@@ -417,10 +455,10 @@ if __name__ == "__main__":
         overrides = {}
         if args.tui:
             config = MODEL_TABLE.get(m, {})
-            default_seqs = config.get("max_num_seqs", "32")
+            default_seqs = config.get("max_num_seqs", "16")
             default_tokens = config.get("max_tokens", DEFAULT_BATCH_TOKENS)
             default_util = config.get("gpu_util", GPU_UTIL)
-            default_ctx = config.get("ctx", "auto")
+            default_ctx = "auto"
             
             form_args = [
                 "--clear", "--backtitle", f"AMD VLLM Cluster Benchmark Configuration (TP: {CLUSTER_TP})",

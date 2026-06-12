@@ -4,16 +4,24 @@ MODEL_TABLE = {
     "meta-llama/Meta-Llama-3.1-8B-Instruct": {
         "trust_remote": False,
         "valid_tp": [1, 2],
-        "max_num_seqs": "64", # Strix Halo Optimized (Bus Batch Scale)
-        "max_tokens": "32768" 
+        "max_num_seqs": "64",
+        "max_tokens": "32768"
     },
     
-    "google/gemma-3-12b-it": {
+    "google/gemma-4-26B-A4B-it": {
         "trust_remote": False,
-        "enforce_eager": True,
+        "enforce_eager": False,
         "valid_tp": [1, 2],
         "max_num_seqs": "64",
-        "max_tokens": "32768" 
+        "max_tokens": "32768"
+    },
+
+    "google/gemma-4-31B-it": {
+        "trust_remote": False,
+        "enforce_eager": False,
+        "valid_tp": [1, 2],
+        "max_num_seqs": "64",
+        "max_tokens": "32768"
     },
     # 2. GPT-OSS 20B (MXFP4)
     # MAD Row 0 uses 8192. We match this exactly.
@@ -27,97 +35,56 @@ MODEL_TABLE = {
     "openai/gpt-oss-120b": {
         "trust_remote": True,
         "valid_tp": [1],
-        "max_num_seqs": "16",
+        "max_num_seqs": "64",
         "max_tokens": "8192"
     },
 
-    "Qwen/Qwen3.5-35B-A3B": {
+    "Qwen/Qwen3.6-35B-A3B": {
         "trust_remote": True,
         "valid_tp": [1],
-        "max_num_seqs": "16",
-        "max_tokens": "8192"
+        "max_num_seqs": "64",
+        "max_tokens": "16384"
     },
 
-    "Qwen/Qwen3-14B-AWQ": {
+    "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit": {
         "trust_remote": True,
-        "valid_tp": [1], # Too big for single GPU
-        "max_num_seqs": "64", # Strix Halo Optimized
-        "max_tokens": "16384", # Lower batch size because Eager mode is CPU intensive
-        "enforce_eager": False, 
-        "env": {"VLLM_USE_TRITON_AWQ": "1"} # Fixes "Unsupported Hardware" error
-    },
+        "valid_tp": [1], 
+        "enforce_eager": True, 
+        "env": {"VLLM_USE_TRITON_AWQ": "1"},
+        "max_num_seqs": "64",
+        "max_tokens": "16384"
+    },  
 
     "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit": {
         "trust_remote": True,
         "valid_tp": [1,2], # Too big for single GPU
-        "max_num_seqs": "64", # Strix Halo Optimized
-        "max_tokens": "16384", # Lower batch size because Eager mode is CPU intensive
         "enforce_eager": True, 
-        "env": {"VLLM_USE_TRITON_AWQ": "1"} # Fixes "Unsupported Hardware" error
-    },
-
-
-    # 4. Qwen 30B 4-bit
-    "btbtyler09/Qwen3-Coder-30B-A3B-Instruct-gptq-4bit": {
-        "trust_remote": True,
-        "enforce_eager": False, 
-        "valid_tp": [1, 2],
+        "env": {"VLLM_USE_TRITON_AWQ": "1"},
         "max_num_seqs": "64",
-        "max_tokens": "32768"
+        "max_tokens": "16384"
     },
 
-    "btbtyler09/Qwen3-Coder-30B-A3B-Instruct-gptq-8bit": {
+    "cyankiwi/Qwen3.5-122B-A10B-AWQ-8bit": {
         "trust_remote": True,
-        "enforce_eager": False, 
-        "valid_tp": [1, 2],
-        "max_num_seqs": "64",
-        "max_tokens": "32768"
-    },
-
-    "zai-org/GLM-4.7-Flash": {
-        "trust_remote": True,
-        "enforce_eager": False, 
-        "valid_tp": [1, 2],
-        "max_num_seqs": "64",
-        "max_tokens": "32768",
-    },
-
-    # 5. Qwen 80B AWQ
-    # Size: ~48GB. Fits on 2x32GB (64GB). Leftover for Cache: ~16GB.
-    # Config: 20k ctx fits in that cache. Eager mode required for stability.
-    "dazipe/Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16": {
-        "trust_remote": True,
-        "valid_tp": [1], # Too big for single GPU
-        "max_num_seqs": "64", # Large Model / Bandwidth Constrained
-        "max_tokens": "16384", # Lower batch size because Eager mode is CPU intensive
+        "valid_tp": [2], # Too big for single GPU
         "enforce_eager": True, 
-        "env": {"VLLM_USE_TRITON_AWQ": "1"} # Fixes "Unsupported Hardware" error
+        "env": {"VLLM_USE_TRITON_AWQ": "1"},
+        "max_num_seqs": "64",
+        "max_tokens": "16384"
     },
 
-    "mratsim/MiniMax-M2.5-BF16-INT4-AWQ": {
+    "cyankiwi/MiniMax-M2.7-AWQ-4bit": {
         "trust_remote": True,
         "valid_tp": [2],
-        "max_num_seqs": "64",
-        "max_tokens": "16384",
         "enforce_eager": False,
-        "env": {"VLLM_USE_TRITON_AWQ": "1"} # Fixes "Unsupported Hardware" error
+        "env": {"VLLM_USE_TRITON_AWQ": "1"},
+        "max_num_seqs": "64",
+        "max_tokens": "16384"
     },
 
 }
 
-MODELS_TO_RUN = [
-    "meta-llama/Meta-Llama-3.1-8B-Instruct",
-    "google/gemma-3-12b-it",
-    "Qwen/Qwen3-14B-AWQ",
-    "openai/gpt-oss-20b",
-    "openai/gpt-oss-120b",
-    "zai-org/GLM-4.7-Flash",
-    "btbtyler09/Qwen3-Coder-30B-A3B-Instruct-gptq-4bit",
-    "btbtyler09/Qwen3-Coder-30B-A3B-Instruct-gptq-8bit",
-    "dazipe/Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16",
-    "Qwen/Qwen3.5-35B-A3B",
-    "cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit"
-]
+MODELS_TO_RUN = list(MODEL_TABLE.keys())
 
 # Hardware / Global Defaults
 GPU_UTIL = "0.90"

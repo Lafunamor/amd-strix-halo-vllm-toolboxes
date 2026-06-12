@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AMD Strix Halo (gfx1151) vLLM Benchmarks</title>
+    <script defer data-domain="kyuz0.github.io/amd-strix-halo-vllm-toolboxes" src="https://plausible.skybound.link/js/plausible.js"></script>
     <style>
         :root {
             --bg-body: #f9fafb;
@@ -493,7 +494,17 @@
                         style="font-size: 0.9rem; font-weight: 500; display: flex; align-items: center; gap: 4px; cursor: pointer;">
                         <input type="checkbox" id="toggleRocm"> ROCm
                     </label>
+                    <label
+                        style="font-size: 0.9rem; font-weight: 500; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                        <input type="checkbox" id="toggleAiter"> AITER
+                    </label>
                 </div>
+            </div>
+        </div>
+
+        <div class="info-box" style="margin-bottom: 20px; background-color: #fffbeb; border-color: #fde68a; color: #92400e;">
+            <div>
+                ⚠️ <strong>Benchmark Methodology:</strong> These numbers represent <strong>Peak Batched Throughput</strong> (measured using 200 ShareGPT prompts with high concurrency). They demonstrate the maximum aggregate tokens/second the hardware can produce when fully saturated. Because vLLM optimizes for highly concurrent workloads, throughput for a single isolated request (Concurrency = 1) will be naturally lower.
             </div>
         </div>
 
@@ -555,7 +566,8 @@
             showTP2Eth: false,
             showTP2Usb: false,
             showTriton: true,
-            showRocm: false
+            showRocm: false,
+            showAiter: false
         };
 
         // Metadata
@@ -619,6 +631,12 @@
                 sel.appendChild(opt);
             });
 
+            // Dynamically hide Ethernet/Thunderbolt toggles if no data is found
+            const hasEth = rawRuns.some(r => r.network === "Ethernet");
+            const hasUsb = rawRuns.some(r => r.tag === "usb");
+            if (!hasEth) $('toggleTP2Eth').parentElement.style.display = 'none';
+            if (!hasUsb) $('toggleTP2Usb').parentElement.style.display = 'none';
+
             $('searchInput').addEventListener('input', e => { state.search = e.target.value.toLowerCase(); render(); });
             sel.addEventListener('change', e => { state.quant = e.target.value; render(); });
 
@@ -629,6 +647,7 @@
             $('toggleTP2Usb').addEventListener('change', e => { state.showTP2Usb = e.target.checked; render(); });
             $('toggleTriton').addEventListener('change', e => { state.showTriton = e.target.checked; render(); });
             $('toggleRocm').addEventListener('change', e => { state.showRocm = e.target.checked; render(); });
+            $('toggleAiter').addEventListener('change', e => { state.showAiter = e.target.checked; render(); });
         }
 
         function processData() {
@@ -647,10 +666,10 @@
                         quant: run.quant,
                         params: run.params_b || run.name_params_b,
                         results: {
-                            1: { triton: null, rocm: null },
-                            2: { triton: null, rocm: null },
-                            "2_eth": { triton: null, rocm: null },
-                            "2_usb": { triton: null, rocm: null }
+                            1: { triton: null, rocm: null, aiter: null },
+                            2: { triton: null, rocm: null, aiter: null },
+                            "2_eth": { triton: null, rocm: null, aiter: null },
+                            "2_usb": { triton: null, rocm: null, aiter: null }
                         }
                     };
                 }
@@ -666,10 +685,11 @@
                     }
                 }
 
-                if (!m.results[tp]) m.results[tp] = { triton: null, rocm: null };
+                if (!m.results[tp]) m.results[tp] = { triton: null, rocm: null, aiter: null };
 
                 if (run.backend === "Triton") m.results[tp].triton = run.tps_mean;
                 if (run.backend === "ROCm") m.results[tp].rocm = run.tps_mean;
+                if (run.backend === "AITER") m.results[tp].aiter = run.tps_mean;
             });
 
             tests = Object.values(testGroups).map(g => ({
@@ -769,18 +789,22 @@
             if (state.showTP1) {
                 if (state.showTriton) cols.push({ id: "tp1_triton", label: "TP1 Triton" });
                 if (state.showRocm) cols.push({ id: "tp1_rocm", label: "TP1 ROCm" });
+                if (state.showAiter) cols.push({ id: "tp1_aiter", label: "TP1 AITER" });
             }
             if (state.showTP2) {
                 if (state.showTriton) cols.push({ id: "tp2_triton", label: "TP2 RoCE Triton" });
                 if (state.showRocm) cols.push({ id: "tp2_rocm", label: "TP2 RoCE ROCm" });
+                if (state.showAiter) cols.push({ id: "tp2_aiter", label: "TP2 RoCE AITER" });
             }
             if (state.showTP2Eth) {
                 if (state.showTriton) cols.push({ id: "tp2_eth_triton", label: "TP2 Eth Triton" });
                 if (state.showRocm) cols.push({ id: "tp2_eth_rocm", label: "TP2 Eth ROCm" });
+                if (state.showAiter) cols.push({ id: "tp2_eth_aiter", label: "TP2 Eth AITER" });
             }
             if (state.showTP2Usb) {
                 if (state.showTriton) cols.push({ id: "tp2_usb_triton", label: "TP2 TB Triton" });
                 if (state.showRocm) cols.push({ id: "tp2_usb_rocm", label: "TP2 TB ROCm" });
+                if (state.showAiter) cols.push({ id: "tp2_usb_aiter", label: "TP2 TB AITER" });
             }
 
             // Thead
@@ -847,12 +871,16 @@
         function getVal(m, colId) {
             if (colId === "tp1_triton") return m.results[1]?.triton;
             if (colId === "tp1_rocm") return m.results[1]?.rocm;
+            if (colId === "tp1_aiter") return m.results[1]?.aiter;
             if (colId === "tp2_triton") return m.results[2]?.triton;
             if (colId === "tp2_rocm") return m.results[2]?.rocm;
+            if (colId === "tp2_aiter") return m.results[2]?.aiter;
             if (colId === "tp2_eth_triton") return m.results["2_eth"]?.triton;
             if (colId === "tp2_eth_rocm") return m.results["2_eth"]?.rocm;
+            if (colId === "tp2_eth_aiter") return m.results["2_eth"]?.aiter;
             if (colId === "tp2_usb_triton") return m.results["2_usb"]?.triton;
             if (colId === "tp2_usb_rocm") return m.results["2_usb"]?.rocm;
+            if (colId === "tp2_usb_aiter") return m.results["2_usb"]?.aiter;
             return null;
         }
 

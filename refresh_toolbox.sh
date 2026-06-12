@@ -3,7 +3,42 @@
 set -e
 
 TOOLBOX_NAME="vllm"
-IMAGE="docker.io/kyuz0/vllm-therock-gfx1151:latest"
+IMAGE_REPO="docker.io/kyuz0/vllm-therock-gfx1151"
+
+# --- Channel selection (stable / latest) ---
+resolve_channel() {
+    local arg="${1:-}"
+    case "$arg" in
+        stable)  echo "stable" ;;
+        latest)  echo "latest" ;;
+        "")
+            # Interactive menu
+            echo "" >&2
+            echo "Which image channel do you want?" >&2
+            echo "  1) stable  — Last verified working build (recommended)" >&2
+            echo "  2) latest  — Absolute latest build (may be unstable)" >&2
+            echo "" >&2
+            read -rp "Choice [1]: " choice
+            case "${choice:-1}" in
+                1|stable)  echo "stable" ;;
+                2|latest)  echo "latest" ;;
+                *)
+                    echo "Invalid choice: $choice" >&2
+                    exit 1
+                    ;;
+            esac
+            ;;
+        *)
+            echo "Usage: $0 [stable|latest]" >&2
+            echo "  stable  — Pull the last verified working build (default)" >&2
+            echo "  latest  — Pull the absolute latest build" >&2
+            exit 1
+            ;;
+    esac
+}
+
+CHANNEL="$(resolve_channel "${1:-}")"
+IMAGE="${IMAGE_REPO}:${CHANNEL}"
 
 # Base options
 OPTIONS="--device /dev/dri --device /dev/kfd --group-add video --group-add render --security-opt seccomp=unconfined"
@@ -36,7 +71,7 @@ else
     exit 1
 fi
 
-echo "🔄 Refreshing $TOOLBOX_NAME via $MANAGER (image: $IMAGE)"
+echo "🔄 Refreshing $TOOLBOX_NAME via $MANAGER (channel: $CHANNEL, image: $IMAGE)"
 
 # Remove existing container if it exists
 if $MANAGER list 2>/dev/null | grep -q "$TOOLBOX_NAME"; then
@@ -44,7 +79,7 @@ if $MANAGER list 2>/dev/null | grep -q "$TOOLBOX_NAME"; then
     $MANAGER rm -f "$TOOLBOX_NAME"
 fi
 
-echo "⬇️ Pulling latest image: $IMAGE"
+echo "⬇️ Pulling image: $IMAGE"
 $RUNTIME pull "$IMAGE"
 
 # Identify current image ID/digest for cleanup
@@ -78,4 +113,4 @@ done < <($RUNTIME images --format '{{.ID}} {{.Repository}}:{{.Tag}}' \
          | awk -v r="$repo" '$2==r":<none>" {print $1}')
 # --- end cleanup ---
 
-echo "✅ $TOOLBOX_NAME refreshed"
+echo "✅ $TOOLBOX_NAME refreshed (channel: $CHANNEL)"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import subprocess, time, json, sys, os, requests, argparse
+import subprocess, time, json, sys, os, requests, argparse, shutil
 from pathlib import Path
 
 try:
@@ -39,8 +39,8 @@ DEFAULT_BATCH_TOKENS = models.DEFAULT_BATCH_TOKENS
 FALLBACK_INPUT_LEN  = 1024
 FALLBACK_OUTPUT_LEN = 512
 
-RESULTS_DIR = Path("benchmark_results")
-RESULTS_DIR.mkdir(exist_ok=True)
+RESULTS_DIR = Path("~/vllm_benchmark_results").expanduser()
+RESULTS_DIR.mkdir(exist_ok=True, parents=True)
 
 
 # =========================
@@ -96,7 +96,7 @@ def get_dataset():
 
 
 def get_model_args(model, tp_size, overrides=None):
-    config = MODEL_TABLE.get(model, {"max_num_seqs": "32"})
+    config = MODEL_TABLE.get(model, {})
     overrides = overrides or {}
     
     # Allow per-model GPU utilization override
@@ -111,10 +111,8 @@ def get_model_args(model, tp_size, overrides=None):
         "--max-num-seqs", str(max_seq_override)
     ]
     
-    # Optional: if a model really needs a hard limit, we can still support "ctx" in config,
-    # but by default we rely on auto.
-    if "ctx" in overrides or "ctx" in config:
-        cmd.extend(["--max-model-len", str(overrides.get("ctx", config.get("ctx")))])
+    if "ctx" in overrides:
+        cmd.extend(["--max-model-len", str(overrides.get("ctx"))])
         
     if config.get("trust_remote"): cmd.append("--trust-remote-code")
     if config.get("enforce_eager"): cmd.append("--enforce-eager")
@@ -147,7 +145,8 @@ def run_throughput(model, tp_size, backend_name="Default", output_dir=RESULTS_DI
     kill_vllm()
     nuke_vllm_cache()
 
-    cmd = ["vllm", "bench", "throughput"] + get_model_args(model, tp_size, overrides)
+    vllm_path = shutil.which("vllm") or "vllm"
+    cmd = ["python", "-W", "ignore", vllm_path, "bench", "throughput"] + get_model_args(model, tp_size, overrides)
     cmd.extend([
         "--num-prompts", str(OFF_NUM_PROMPTS),
         "--max-num-batched-tokens", batch_tokens,
@@ -157,9 +156,15 @@ def run_throughput(model, tp_size, backend_name="Default", output_dir=RESULTS_DI
     ])
     cmd.extend(dataset_args)
 
-    # Force Attention Backend via CLI if ROCm-Attn
-    if backend_name == "ROCm-Attn":
+    # Explicitly set Attention Backend for every run
+    if backend_name == "AITER-Attn":
         cmd.extend(["--attention-backend", "ROCM_ATTN"])
+    elif backend_name == "ROCm-Attn":
+        cmd.extend(["--attention-backend", "ROCM_ATTN"])
+    else:
+        cmd.extend(["--attention-backend", "TRITON_ATTN"])
+
+    cmd.extend(["--mm-encoder-attn-backend", "TRITON_ATTN"])
 
     # ENV Setup: Global + Model Specific
     env = os.environ.copy()
@@ -180,8 +185,8 @@ def run_throughput(model, tp_size, backend_name="Default", output_dir=RESULTS_DI
 
 
 def print_summary(tps):
-    print(f"\n{'MODEL':<40} | {'TP':<2} | {'Tag':<15} | {'Triton':<8} | {'ROCm':<8}")
-    print("-" * 92)
+    print(f"\n{'MODEL':<40} | {'TP':<2} | {'Tag':<15} | {'Triton':<8} | {'ROCm':<8} | {'AITER':<8}")
+    print("-" * 103)
     
     for m in MODELS_TO_RUN:
         msafe = m.replace("/", "_")
@@ -193,12 +198,17 @@ def print_summary(tps):
             prefix = f"{msafe}_tp{tp}"
             
             tags = set()
-            for p in RESULTS_DIR.glob(f"{prefix}*_throughput.json"):
+            for p in (RESULTS_DIR / "triton").glob(f"{prefix}*_throughput.json"):
                 name_part = p.name[len(prefix):-len("_throughput.json")]
                 tag = name_part.lstrip("_")
                 tags.add(tag)
                 
-            for p in Path("benchmark_results_rocm").glob(f"{prefix}*_throughput.json"):
+            for p in (RESULTS_DIR / "rocm").glob(f"{prefix}*_throughput.json"):
+                name_part = p.name[len(prefix):-len("_throughput.json")]
+                tag = name_part.lstrip("_")
+                tags.add(tag)
+                
+            for p in (RESULTS_DIR / "aiter").glob(f"{prefix}*_throughput.json"):
                 name_part = p.name[len(prefix):-len("_throughput.json")]
                 tag = name_part.lstrip("_")
                 tags.add(tag)
@@ -211,7 +221,7 @@ def print_summary(tps):
                 
                 # Default
                 try: 
-                    p1 = RESULTS_DIR / f"{prefix}{tag_suffix}_throughput.json"
+                    p1 = (RESULTS_DIR / "triton") / f"{prefix}{tag_suffix}_throughput.json"
                     if p1.exists():
                         d1 = json.loads(p1.read_text())
                         val1 = f"{d1.get('tokens_per_second', 0):.1f}"
@@ -221,7 +231,7 @@ def print_summary(tps):
                 
                 # ROCm
                 try:
-                    p2 = Path("benchmark_results_rocm") / f"{prefix}{tag_suffix}_throughput.json"
+                    p2 = (RESULTS_DIR / "rocm") / f"{prefix}{tag_suffix}_throughput.json"
                     if p2.exists():
                         d2 = json.loads(p2.read_text())
                         val2 = f"{d2.get('tokens_per_second', 0):.1f}"
@@ -229,19 +239,31 @@ def print_summary(tps):
                         val2 = "N/A"
                 except: val2 = "N/A"
 
+                # AITER
+                try:
+                    p3 = (RESULTS_DIR / "aiter") / f"{prefix}{tag_suffix}_throughput.json"
+                    if p3.exists():
+                        d3 = json.loads(p3.read_text())
+                        val3 = f"{d3.get('tokens_per_second', 0):.1f}"
+                    else:
+                        val3 = "N/A"
+                except: val3 = "N/A"
+
                 display_tag = tag if tag else "(Default)"
-                print(f"{name_cell:<40} | {tp:<2} | {display_tag:<15} | {val1:<8} | {val2:<8}")
+                print(f"{name_cell:<40} | {tp:<2} | {display_tag:<15} | {val1:<8} | {val2:<8} | {val3:<8}")
                 
-    print("-" * 92)
+    print("-" * 103)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="VLLM High-Concurrency Throughput Benchmark Suite")
     parser.add_argument("--tp", type=int, nargs="+", default=[1])
     parser.add_argument("--tui", action="store_true", help="Launch interactive configuration UI")
     args = parser.parse_args()
     
     gpu_count = get_gpu_count()
     log(f"Detected {gpu_count} AMD GPU(s)")
+    log("NOTE: Running Peak Throughput Benchmark. This simulates high-concurrency batching to saturate hardware bandwidth.")
+    log("This does NOT represent single-request user generation speed (Concurrency=1).")
     
     valid_tp_args = [t for t in args.tp if t <= gpu_count]
     if not valid_tp_args:
@@ -320,14 +342,19 @@ if __name__ == "__main__":
                         
                     overrides["tag"] = lines[4].strip()
             
-            # 1. Default (Triton)
-            run_throughput(m, tp, "Default", RESULTS_DIR, overrides=overrides)
+            # 1. Triton Attention (explicit)
+            run_throughput(m, tp, "Triton-Attn", RESULTS_DIR / "triton", overrides=overrides)
             
             # 2. ROCm Attention 
             # We force this via CLI argument --attention-backend ROCM_ATTN below
             # No specific env vars needed if forcing backend.
             rocm_env = {}
             print(f"[DEBUG] Forcing ROCm Env: {rocm_env} + CLI: --attention-backend ROCM_ATTN")
-            run_throughput(m, tp, "ROCm-Attn", "benchmark_results_rocm", rocm_env, overrides=overrides)
+            run_throughput(m, tp, "ROCm-Attn", RESULTS_DIR / "rocm", rocm_env, overrides=overrides)
+            
+            # 3. AITER Attention
+            aiter_env = {"VLLM_ROCM_USE_AITER": "1"}
+            print(f"[DEBUG] Forcing AITER Env: {aiter_env} + CLI: --attention-backend ROCM_ATTN")
+            run_throughput(m, tp, "AITER-Attn", RESULTS_DIR / "aiter", aiter_env, overrides=overrides)
             
     print_summary(valid_tp_args)

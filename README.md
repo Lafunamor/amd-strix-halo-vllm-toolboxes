@@ -2,8 +2,6 @@
 
 An **Fedora 43** Docker/Podman container that is **Toolbx-compatible** (usable as a Fedora toolbox) for serving LLMs with **vLLM** on **AMD Ryzen AI Max “Strix Halo” (gfx1151)**. Built on the **TheRock nightly builds** for ROCm.
 
-> **Note on Vision Models:** To prevent indefinite hangs during MIOpen exhaustive kernel search, vision encoder profiling is currently patched out. This means **vision features are currently unavailable** for models like Qwen3.5 MoE. Thanks to user `3spky5u-oss` for contributing this patch! For more details, see [Issue #30](https://github.com/kyuz0/amd-strix-halo-vllm-toolboxes/issues/30).
-
 ---
 
 ## 🚀 High-Performance Clustering Support (New!)
@@ -22,6 +20,11 @@ This repository is part of the **[Strix Halo AI Toolboxes](https://strix-halo-to
 
 This is a hobby project maintained in my spare time. If you find these toolboxes and tutorials useful, you can **[buy me a coffee](https://buymeacoffee.com/dcapitella)** to support the work! ☕
 
+## 🙏 Acknowledgments
+
+* **Adrian ([@Lafunamor](https://github.com/Lafunamor))**: Huge thanks for all the help, PRs, and testing to get this project stabilized!
+* **Patrick Audley ([paudley/ai-notes](https://github.com/paudley/ai-notes))**: Thanks for the `strix-halo` build notes. This toolbox relies on that research (specifically the Triton patches and `aiter` compilation strategy) to successfully run vLLM and AITER Flash-Attention on Strix Halo.
+
 ---
 
 ## Table of Contents
@@ -38,40 +41,55 @@ This is a hobby project maintained in my spare time. If you find these toolboxes
 
 ## Tested Models (Benchmarks)
 
+> [!IMPORTANT]
+> **Note on Throughput:** These benchmarks measure **Peak Multi-User Throughput** (Tokens/Second) at high concurrency (batching multiple sequences simultaneously to saturate the Strix Halo's memory bandwidth). If you are testing with a single request (Concurrency = 1), your individual generation speed will be lower than these maximum hardware-saturation numbers. These metrics represent the total capacity of the system under heavy load.
+
 View full benchmarks at: [https://kyuz0.github.io/amd-strix-halo-vllm-toolboxes/](https://kyuz0.github.io/amd-strix-halo-vllm-toolboxes/)
 
-**Table Key:** Cell values represent `Max Context Length (GPU Memory Utilization)`.
-
-| Model | TP | 1 Req | 4 Reqs | 8 Reqs | 16 Reqs |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **`meta-llama/Meta-Llama-3.1-8B-Instruct`** | 1 | 128k (0.95) | 128k (0.95) | 128k (0.95) | 128k (0.95) |
-| **`google/gemma-3-12b-it`** | 1 | 128k (0.95) | 128k (0.95) | 128k (0.95) | 128k (0.95) |
-| **`openai/gpt-oss-20b`** | 1 | 128k (0.95) | 128k (0.95) | 128k (0.95) | 128k (0.95) |
-| **`Qwen/Qwen3-14B-AWQ`** | 1 | 40k (0.95) | 40k (0.95) | 40k (0.95) | 40k (0.95) |
-| **`btbtyler09/Qwen3-Coder-30B-A3B-Instruct-gptq-4bit`** | 1 | 256k (0.95) | 256k (0.95) | 256k (0.95) | 256k (0.95) |
-| **`btbtyler09/Qwen3-Coder-30B-A3B-Instruct-gptq-8bit`** | 1 | 256k (0.95) | 256k (0.95) | 256k (0.95) | 256k (0.95) |
-| **`dazipe/Qwen3-Next-80B-A3B-Instruct-GPTQ-Int4A16`** | 1 | 256k (0.95) | 256k (0.95) | 256k (0.95) | 256k (0.95) |
-| **`openai/gpt-oss-120b`** | 1 | 128k (0.95) | 128k (0.95) | 128k (0.95) | 128k (0.95) |
-| **`zai-org/GLM-4.7-Flash`** | 1 | 198k (0.95) | 198k (0.95) | 198k (0.95) | 198k (0.95) |
+| Model | Params / Quant | GPU Requirement |
+| :--- | :--- | :--- |
+| [`meta-llama/Meta-Llama-3.1-8B-Instruct`](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct) | 8B / BF16 | 1 GPU (TP=1, 2) |
+| [`google/gemma-4-26B-A4B-it`](https://huggingface.co/google/gemma-4-26B-A4B-it) | 26B / BF16 | 1 GPU (TP=1, 2) |
+| [`google/gemma-4-31B-it`](https://huggingface.co/google/gemma-4-31B-it) | 31B / BF16 | 1 GPU (TP=1, 2) |
+| [`openai/gpt-oss-20b`](https://huggingface.co/openai/gpt-oss-20b) | 20B / BF16 | 1 GPU (TP=1, 2) |
+| [`openai/gpt-oss-120b`](https://huggingface.co/openai/gpt-oss-120b) | 120B / BF16 | 1 GPU (TP=1) |
+| [`Qwen/Qwen3.6-35B-A3B`](https://huggingface.co/Qwen/Qwen3.6-35B-A3B) | 35B / BF16 | 1 GPU (TP=1) |
+| [`cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit`](https://huggingface.co/cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit) | 35B / AWQ 4-bit | 1 GPU (TP=1) |
+| [`cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit`](https://huggingface.co/cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit) | 122B / AWQ 4-bit | 1 GPU (TP=1, 2) |
+| [`cyankiwi/Qwen3.5-122B-A10B-AWQ-8bit`](https://huggingface.co/cyankiwi/Qwen3.5-122B-A10B-AWQ-8bit) | 122B / AWQ 8-bit | **2 GPUs (TP=2 Only)** |
+| [`cyankiwi/MiniMax-M2.7-AWQ-4bit`](https://huggingface.co/cyankiwi/MiniMax-M2.7-AWQ-4bit) | N/A / AWQ 4-bit | **2 GPUs (TP=2 Only)** |
 
 
 ---
 
 ## 1) Toolbx vs Docker/Podman
 
-The `kyuz0/vllm-therock-gfx1151:latest` image can be used both as: 
+The `kyuz0/vllm-therock-gfx1151` image is available in two channels:
 
-* **Fedora Toolbx (recommended for development):** Toolbx shares your **HOME** and user, so models/configs live on the host. Great for iterating quickly while keeping the host clean. 
+| Tag | Description |
+| :--- | :--- |
+| **`:stable`** | Last verified working build. **Recommended for most users.** |
+| **`:latest`** | Absolute latest build. May contain upstream regressions. |
+
+The image can be used both as:
+
+* **Fedora Toolbx (recommended for development):** Toolbx shares your **HOME** and user, so models/configs live on the host. Great for iterating quickly while keeping the host clean.
 * **Docker/Podman (recommended for deployment/perf):** Use for running vLLM as a service (host networking, IPC tuning, etc.). Always **mount a host directory** for model weights so they stay outside the container.
+
 
 ---
 
 ## 2) Quickstart — Fedora Toolbx
 
-**Recommended:** Use the included `refresh_toolbox.sh` script. It pulls the latest image and creates the toolbox with the correct parameters:
+**Recommended:** Use the included `refresh_toolbox.sh` script. It pulls the image and creates the toolbox with the correct parameters:
 
 ```bash
+# Interactive — prompts you to choose stable (default) or latest
 ./refresh_toolbox.sh
+
+# Or specify directly:
+./refresh_toolbox.sh stable   # verified working build
+./refresh_toolbox.sh latest   # bleeding edge
 ```
 
 > **InfiniBand / RDMA Support:** The script automatically detects if a fast InfiniBand link is active (checks `/dev/infiniband`). If found, it correctly sets up the container to expose these devices, enabling high-performance clustering.
@@ -82,7 +100,7 @@ To manually create a toolbox that exposes the GPU and relaxes seccomp:
 
 ```bash
 toolbox create vllm \
-  --image docker.io/kyuz0/vllm-therock-gfx1151:latest \
+  --image docker.io/kyuz0/vllm-therock-gfx1151:stable \
   -- --device /dev/dri --device /dev/kfd \
   --group-add video --group-add render --security-opt seccomp=unconfined
 ```
@@ -113,7 +131,7 @@ Ubuntu’s toolbox package still breaks GPU access, so use Distrobox instead:
 
 ```bash
 distrobox create -n vllm \
-  --image docker.io/kyuz0/vllm-therock-gfx1151:latest \
+  --image docker.io/kyuz0/vllm-therock-gfx1151:stable \
   --additional-flags "--device /dev/kfd --device /dev/dri --group-add video --group-add render --security-opt seccomp=unconfined"
 
 distrobox enter vllm
@@ -193,11 +211,14 @@ This should work on any Strix Halo. For a complete list of available hardware, s
 
 Add these boot parameters to enable unified memory while reserving a minimum of 4 GiB for the OS (max 124 GiB for iGPU):
 
-iommu=pt amdgpu.gttsize=126976 ttm.pages_limit=32505856
+> [!WARNING]
+> Based on [benchmarking by Lars Urban (@urbanswelt)](https://github.com/urbanswelt), there is definitive indication that setting `amd_iommu=off` performs better than the previously recommended `iommu=pt`. Key result: `amd_iommu=off` is 5-12% faster than either IOMMU-enabled mode. See [Issue #66](https://github.com/kyuz0/amd-strix-halo-toolboxes/issues/66#issuecomment-4460612951) for details.
+
+`amd_iommu=off amdgpu.gttsize=126976 ttm.pages_limit=32505856`
 
 | Parameter                   | Purpose                                                                                    |
 |-----------------------------|--------------------------------------------------------------------------------------------|
-| `iommu=pt`              | Sets IOMMU to "Pass-Through" mode. This helps performance, reducing overhead for both the RDMA NIC and the iGPU unified memory access.               |
+| `amd_iommu=off`             | Disables the AMD IOMMU. This improves performance over `iommu=pt`, reducing overhead for both the RDMA NIC and the iGPU unified memory access. |
 | `amdgpu.gttsize=126976`     | Caps GPU unified memory to 124 GiB; 126976 MiB ÷ 1024 = 124 GiB                            |
 | `ttm.pages_limit=32505856`  | Caps pinned memory to 124 GiB; 32505856 × 4 KiB = 126976 MiB = 124 GiB                     |
 
@@ -222,3 +243,14 @@ This toolbox supports high-performance clustering of multiple Strix Halo nodes u
 *   **Custom RCCL Patch:** Use of a custom-built `librccl.so` to support RDMA on `gfx1151`.
 *   **Easy Setup:** `refresh_toolbox.sh` automatically detects and exposes RDMA devices.
 *   **Cluster Management:** Included `start-vllm-cluster` TUI for managing Ray and vLLM.
+
+## 8) AITER on Strix Halo Support Status
+
+This toolbox supports running **AITER Flash Attention** on Strix Halo (gfx1151). Normally, vLLM crashes on RDNA APUs if `VLLM_ROCM_USE_AITER=1` is enabled, because AITER attempts to JIT-compile CDNA-specific MoE (Mixture of Experts) and CustomOps assembly instructions that lack RDNA hardware support.
+
+To bypass this limitation, `scripts/patch_strix.py` applies a few APU-specific guards (building on the work from `ai-notes` linked above):
+* **Patch 2 (`vllm/_aiter_ops.py`)**: Intercepts the MoE gate (`is_fused_moe_enabled()`) forcing it to disable AITER MoE and Linear FP8 on `gfx1x` architectures.
+* **Patch 3.5 (`vllm/model_executor/layers/fused_moe/oracle/unquantized.py`)**: Blocks the `VLLM_ROCM_USE_AITER_MOE` environment variable from forcing a JIT compile override.
+* **Patch 5 (`vllm/platforms/rocm.py`)**: Bypasses the RMSNorm custom op registration on `gfx1x` to prevent CUDA Graph capture crashes during model initialization.
+
+Because of these patches, when `ROCm` Attention is selected in the launcher, vLLM routes Attention to AITER (using the `ds_swizzle` RDNA header fallbacks injected via `scripts/patch_aiter_headers.py`), while safely falling back to Triton for MoE matrices and Torch/Triton for RMSNorm.

@@ -1,0 +1,40 @@
+name: promote-stable
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: "Tag to promote to 'stable' (e.g. latest, 20260419-143000)"
+        required: true
+        default: "latest"
+
+env:
+  IMAGE_REPO: kyuz0/vllm-therock-gfx1151
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Pull, re-tag, and push as stable
+        run: |
+          set -eux
+          SOURCE="docker.io/${{ env.IMAGE_REPO }}:${{ github.event.inputs.source_tag }}"
+          TARGET="docker.io/${{ env.IMAGE_REPO }}:stable"
+
+          echo "Promoting $SOURCE → $TARGET"
+          docker pull "$SOURCE"
+          docker tag "$SOURCE" "$TARGET"
+          docker push "$TARGET"
+
+      - name: Summary
+        run: |
+          echo "### ✅ Promoted to stable" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source:** \`${{ env.IMAGE_REPO }}:${{ github.event.inputs.source_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target:** \`${{ env.IMAGE_REPO }}:stable\`" >> $GITHUB_STEP_SUMMARY

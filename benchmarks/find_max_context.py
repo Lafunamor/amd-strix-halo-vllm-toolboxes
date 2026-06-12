@@ -68,25 +68,18 @@ CONCURRENCY_STEPS = [1, 4, 8, 16]
 
 def log(msg):    print(f"[MAX-CTX] {msg}", flush=True)
 
-def get_gpu_count():
+def get_gpu_count(use_cluster=False):
     """
     Returns total GPUs. 
-    If Ray Cluster is active, returns TOTAL cluster GPUs (e.g., 2).
-    Otherwise returns local AMD GPUs.
+    If --use-cluster is passed AND Ray Cluster is active, returns cluster GPU count.
+    Otherwise returns 1 (local single-GPU mode, no Ray).
     """
-    if cluster_manager.check_ray_status():
-        # Ideally we'd query Ray for total resources, but for this specific 2-node setup:
-        # If cluster is up, we assume 2 nodes x 1 GPU = 2 GPUs.
-        # Constructing a Ray client just to count is slow/complex here.
+    if use_cluster and cluster_manager.check_ray_status():
         log("Ray Cluster Detected: Assuming 2 GPUs available.")
         return 2
         
-    # Local Fallback
-    try:
-        res = subprocess.run("rocm-smi --showid", shell=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if res.returncode == 0:
-            return res.stdout.count("GPU")
-    except: pass
+    # Local mode: always 1 GPU. Even if rocm-smi reports multiple entries,
+    # we don't use Ray for TP>1 without --use-cluster.
     return 1
 
 
@@ -118,10 +111,10 @@ def get_hf_context_limit(model_name, trust_remote=False):
         log(f"Warning: Could not read config for {model_name}: {e}. Defaulting to 32768.")
         return 32768
 
-def get_vllm_server_cmd(model, tp_size, util, max_len, max_seqs):
+def get_vllm_server_cmd(model, tp_size, util, max_len, max_seqs, use_cluster=False):
     """
     Constructs the vLLM serve command.
-    Using Ray Backend if tp_size > 1 (Cluster Mode).
+    Only uses Ray Backend if use_cluster=True AND tp_size > 1.
     """
     config = MODEL_TABLE[model]
     
@@ -132,6 +125,8 @@ def get_vllm_server_cmd(model, tp_size, util, max_len, max_seqs):
         "--tensor-parallel-size", str(tp_size),
         "--max-num-seqs", str(max_seqs),
         "--dtype", "auto",
+        "--attention-backend", "TRITON_ATTN",
+        "--mm-encoder-attn-backend", "TRITON_ATTN",
         # "--disable-log-stats" 
     ]
     
@@ -141,24 +136,14 @@ def get_vllm_server_cmd(model, tp_size, util, max_len, max_seqs):
     env.update(config.get("env", {}))
 
     # CLUSTER / RAY LOGIC
-    # Only if we need more than 1 GPU do we engage the cluster machinery
-    if tp_size > 1:
+    # Only engage Ray if explicitly requested via --use-cluster
+    if use_cluster and tp_size > 1:
         log(f"TP={tp_size} > 1: Using Ray Distributed Backend")
         cmd.extend(["--distributed-executor-backend", "ray"])
         
-        # Inject Cluster Env Vars (similar to start_vllm_cluster.py)
-        # We need to know Head IP and RDMA Interface
         rdma_iface = cluster_manager.get_net_iface()
-        head_ip = cluster_manager.get_local_ip(rdma_iface) # Assuming we run this ON HEAD
-        
-        # IMPORTANT: vLLM needs to bind to the Head IP for Ray workers to reach it? 
-        # Or at least we should be explicit.
+        head_ip = cluster_manager.get_local_ip(rdma_iface)
         cmd.extend(["--host", head_ip])
-        
-        # Update our own process env so verify_context knows where to look?
-        # No, verify_context runs in THIS process. We need to export it or pass it.
-        # Simplest is to set it in os.environ for OUR process too, but that might be messy.
-        # Better: We rely on standard PORT.
         
         env["RAY_EXPERIMENTAL_NOSET_ROCR_VISIBLE_DEVICES"] = "1"
         env["VLLM_HOST_IP"] = head_ip
@@ -241,7 +226,7 @@ def force_cleanup(hard=False):
         time.sleep(1.5) # Wait a bit before hammering again
 
 
-def wait_for_server_and_parse(process, timeout=300):
+def wait_for_server_and_parse(process, timeout=900):
     """
     Waits for server to be ready.
     Parses stdout for "Count of GPU blocks" and "Block size".
@@ -403,7 +388,7 @@ def verify_context(model, context_len):
             
     return False, "Unknown Error"
 
-def run_probe(model, tp, util, max_seqs, start_limit=None):
+def run_probe(model, tp, util, max_seqs, start_limit=None, use_cluster=False):
     """
     Probes a specific configuration starting from the model's architectural limit.
     """
@@ -435,7 +420,7 @@ def run_probe(model, tp, util, max_seqs, start_limit=None):
     while target_len >= 2048:
         force_cleanup()
         
-        cmd, env = get_vllm_server_cmd(model, tp, util, target_len, max_seqs)
+        cmd, env = get_vllm_server_cmd(model, tp, util, target_len, max_seqs, use_cluster=use_cluster)
         log(f"DEBUG: Cmd: {' '.join(cmd)}")
         
         proc = None
@@ -574,9 +559,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, help="Filter to run only this model (substring match)")
     parser.add_argument("--steps", type=int, default=-1, help="Number of models to run (default: all)")
+    parser.add_argument("--use-cluster", action="store_true", help="Enable testing TP>1 models over the Ray cluster if available")
     args = parser.parse_args()
 
-    gpu_count = get_gpu_count()
+    gpu_count = get_gpu_count(use_cluster=args.use_cluster)
     
     # 1. Load existing results to support RESUME
     results = []
@@ -637,7 +623,7 @@ def main():
                         log(f"Skipping {model} (TP={tp}, Util={util}, Seqs={seqs}) - Found in results.")
                     else:
                         # New run
-                        res = run_probe(model, tp, util, seqs, start_limit=last_working_len)
+                        res = run_probe(model, tp, util, seqs, start_limit=last_working_len, use_cluster=args.use_cluster)
                         results.append(res)
                         
                         # Save immediately
