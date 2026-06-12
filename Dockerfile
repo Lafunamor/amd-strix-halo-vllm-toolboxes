@@ -27,10 +27,16 @@ RUN printf 'source /opt/venv/bin/activate\n' > /etc/profile.d/venv.sh
 RUN python -m pip install --upgrade pip wheel packaging "setuptools<80.0.0"
 
 # 5. Install PyTorch (TheRock Nightly)
+# Pin the ROCm nightly torch to a known-good build instead of floating on
+# latest. The 7.14.0a20260611+ nightlies segfault during HIP runtime init on
+# gfx1151 (torch.cuda.is_available() dies with SIGSEGV); 20260608 is the
+# newest validated build. Bump deliberately after testing, via
+# --build-arg TORCH_ROCM_VERSION=<version> or by editing the default.
+ARG TORCH_ROCM_VERSION=2.13.0a0+rocm7.14.0a20260608
 RUN python -m pip install \
   --index-url https://rocm.nightlies.amd.com/v2-staging/gfx1151/ \
-  --pre torch torchaudio torchvision && \
-  find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true && \
+  --pre "torch==${TORCH_ROCM_VERSION}" torchaudio torchvision && \
+  (find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true) && \
   rm -rf /root/.cache/pip
 
 WORKDIR /opt
