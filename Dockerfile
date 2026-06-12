@@ -106,13 +106,20 @@ ENV MAX_JOBS=${MAX_JOBS}
 ENV CC="/opt/rocm/llvm/bin/clang"
 ENV CXX="/opt/rocm/llvm/bin/clang++"
 
+# vLLM main (>= 2026-06) ships PyO3/Rust extensions (vllm/_rust_*.so) and
+# needs a Rust toolchain + setuptools-rust at wheel-build time. Installed here
+# rather than with the early build deps so the expensive flash-attention/AITER
+# layers above stay cacheable.
+RUN dnf install -y rust cargo && dnf clean all && rm -rf /var/cache/dnf/* && \
+  python -m pip install "setuptools-rust>=1.9.0" && rm -rf /root/.cache/pip
+
 RUN export HIP_DEVICE_LIB_PATH=$(find /opt/rocm -type d -name bitcode -print -quit) && \
   echo "Compiling with Bitcode: $HIP_DEVICE_LIB_PATH" && \
   export CMAKE_ARGS="-DROCM_PATH=/opt/rocm -DHIP_PATH=/opt/rocm -DAMDGPU_TARGETS=gfx1151 -DHIP_ARCHITECTURES=gfx1151" && \   
   python -m pip wheel --no-build-isolation --no-deps -w /tmp/dist -v . && \
   python -m pip install /tmp/dist/*.whl && \
   rm -rf /tmp/dist && \
-  find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true && \
+  (find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true) && \
   rm -rf /root/.cache/pip
 
 RUN python -m pip install ray
