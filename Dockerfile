@@ -27,6 +27,8 @@ RUN printf 'source /opt/venv/bin/activate\n' > /etc/profile.d/venv.sh
 RUN python -m pip install --upgrade pip wheel packaging "setuptools<80.0.0"
 
 # 5. Install PyTorch (TheRock Nightly)
+# Pin to known good version
+ARG TORCH_ROCM_VERSION=2.13.0a0+rocm7.14.0a20260608
 RUN python -m pip install \
   --index-url https://rocm.nightlies.amd.com/v2-staging/gfx1151/ \
   --pre torch torchaudio torchvision && \
@@ -44,21 +46,21 @@ ENV FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE"
 ENV LD_LIBRARY_PATH="/opt/rocm/lib:/opt/rocm/lib64:$LD_LIBRARY_PATH"
 
 RUN git clone https://github.com/ROCm/flash-attention.git && \
-    cd flash-attention && \
-    git checkout main_perf && \
-    git submodule update --init third_party/aiter && \
-    cd third_party/aiter && \
-    git submodule update --init 3rdparty/composable_kernel && \
-    export CK_DIR="$(pwd)/3rdparty/composable_kernel" && \
-    python -m pip wheel --no-build-isolation --no-deps -w /tmp/dist -v . && \
-    python -m pip install --force-reinstall /tmp/dist/amd_aiter*.whl && \
-    python /opt/patch_aiter_headers.py && \
-    cd /opt/flash-attention && \
-    python -c "import re; f=open('setup.py','r'); t=f.read(); f.close(); t=re.sub(r'subprocess\.run\([\s\S]*?third_party/aiter[\s\S]*?check=True,\s*\)', 'pass # patched', t); f=open('setup.py','w'); f.write(t)" && \
-    pip install --no-build-isolation --no-deps . && \
-    cd /opt && rm -rf /opt/flash-attention /opt/patch_aiter_headers.py && \
-    (find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true) && \
-    rm -rf /root/.cache/pip
+  cd flash-attention && \
+  git checkout main_perf && \
+  git submodule update --init third_party/aiter && \
+  cd third_party/aiter && \
+  git submodule update --init 3rdparty/composable_kernel && \
+  export CK_DIR="$(pwd)/3rdparty/composable_kernel" && \
+  python -m pip wheel --no-build-isolation --no-deps -w /tmp/dist -v . && \
+  python -m pip install --force-reinstall /tmp/dist/amd_aiter*.whl && \
+  python /opt/patch_aiter_headers.py && \
+  cd /opt/flash-attention && \
+  python -c "import re; f=open('setup.py','r'); t=f.read(); f.close(); t=re.sub(r'subprocess\.run\([\s\S]*?third_party/aiter[\s\S]*?check=True,\s*\)', 'pass # patched', t); f=open('setup.py','w'); f.write(t)" && \
+  pip install --no-build-isolation --no-deps . && \
+  cd /opt && rm -rf /opt/flash-attention /opt/patch_aiter_headers.py && \
+  (find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true) && \
+  rm -rf /root/.cache/pip
 
 # Fix Fedora lib vs lib64 split: setup.py install writes to lib/, pip to lib64/.
 # flash-attention's find_packages() may install a partial aiter copy into lib/.
@@ -67,12 +69,12 @@ RUN git clone https://github.com/ROCm/flash-attention.git && \
 # site-packages dirs resolve to the same path — skip the merge, since the
 # cp-into-self then rm-rf would delete the entire aiter package.
 RUN lib_sp=/opt/venv/lib/python3.12/site-packages; \
-    lib64_sp=/opt/venv/lib64/python3.12/site-packages; \
-    if [ "$(readlink -f "$lib_sp")" != "$(readlink -f "$lib64_sp")" ] && \
-       [ -d "$lib_sp/aiter" ]; then \
-      cp -rn "$lib_sp/aiter/"* "$lib64_sp/aiter/" 2>/dev/null || true; \
-      rm -rf "$lib_sp/aiter"; \
-    fi
+  lib64_sp=/opt/venv/lib64/python3.12/site-packages; \
+  if [ "$(readlink -f "$lib_sp")" != "$(readlink -f "$lib64_sp")" ] && \
+  [ -d "$lib_sp/aiter" ]; then \
+  cp -rn "$lib_sp/aiter/"* "$lib64_sp/aiter/" 2>/dev/null || true; \
+  rm -rf "$lib_sp/aiter"; \
+  fi
 
 # 6. Clone vLLM
 # Optional: pin to a specific vLLM commit for reproducible builds.
@@ -81,8 +83,8 @@ ARG VLLM_COMMIT=
 RUN git clone https://github.com/vllm-project/vllm.git /opt/vllm
 WORKDIR /opt/vllm
 RUN if [ -n "$VLLM_COMMIT" ]; then \
-      echo "Pinning vLLM to commit $VLLM_COMMIT" && git checkout "$VLLM_COMMIT"; \
-    fi
+  echo "Pinning vLLM to commit $VLLM_COMMIT" && git checkout "$VLLM_COMMIT"; \
+  fi
 
 # --- PATCHING ---
 COPY scripts/patch_strix.py /opt/vllm/patch_strix.py
