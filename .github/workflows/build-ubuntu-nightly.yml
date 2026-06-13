@@ -130,15 +130,16 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ steps.ver.outputs.combo }}
 
-      - name: Build image (no push)
+      # Push directly from buildx (no `load`) — avoids materializing the full
+      # ~26GB image locally, which overflows the runner disk.
+      - name: Build & push image
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.ubuntu
           platforms: linux/amd64
-          push: false
-          load: true
+          push: true
           pull: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -153,26 +154,6 @@ jobs:
           # are cached and reused; only the vLLM clone/compile reruns per commit.
           cache-from: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache
           cache-to: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
-
-      - name: Push image (with retries)
-        run: |
-          set -eux
-          TAGS="${{ steps.meta.outputs.tags }}"
-          for tag in $TAGS; do
-            for attempt in 1 2 3; do
-              echo "Pushing $tag (attempt $attempt/3)..."
-              if docker push "$tag"; then
-                echo "✅ Pushed $tag"
-                break
-              fi
-              if [ "$attempt" -eq 3 ]; then
-                echo "❌ Failed to push $tag after 3 attempts"
-                exit 1
-              fi
-              echo "⏳ Retrying in 30s..."
-              sleep 30
-            done
-          done
 
       - name: Prune buildx cache
         if: always()
