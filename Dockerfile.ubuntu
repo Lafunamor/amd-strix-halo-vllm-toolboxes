@@ -55,9 +55,15 @@ ENV ROCM_PATH=/opt/rocm HIP_PATH=/opt/rocm VLLM_TARGET_DEVICE=rocm \
 ARG VLLM_REF=eb28452b1
 ARG MAX_JOBS=4
 ENV MAX_JOBS=${MAX_JOBS}
-RUN git clone https://github.com/vllm-project/vllm.git /opt/vllm
+# Clone + checkout in ONE RUN keyed on VLLM_REF: it's a cache hit while the ref
+# is unchanged (so the expensive torch/apt/build-dep layers above stay cached),
+# and re-clones fresh whenever VLLM_REF changes — which also avoids a stale
+# cached clone failing `git checkout` on a newly-released tag/commit.
+WORKDIR /opt
+RUN git clone https://github.com/vllm-project/vllm.git /opt/vllm && \
+    cd /opt/vllm && \
+    if [ -n "$VLLM_REF" ]; then echo "Checking out vLLM $VLLM_REF" && git checkout "$VLLM_REF"; fi
 WORKDIR /opt/vllm
-RUN if [ -n "$VLLM_REF" ]; then echo "Checking out vLLM $VLLM_REF" && git checkout "$VLLM_REF"; fi
 COPY scripts/patch_strix.py /opt/vllm/patch_strix.py
 RUN python /opt/vllm/patch_strix.py
 RUN export HIP_DEVICE_LIB_PATH=$(find /opt/rocm -type d -name bitcode -print -quit) && \

@@ -149,8 +149,10 @@ jobs:
             VLLM_REF=${{ steps.ver.outputs.vllm_ref }}
           provenance: false
           sbom: false
+          # mode=max so the multi-stage builder layers (apt, torch, build deps)
+          # are cached and reused; only the vLLM clone/compile reruns per commit.
           cache-from: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache
-          cache-to: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache,mode=min,image-manifest=true,oci-mediatypes=true
+          cache-to: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
 
       - name: Push image (with retries)
         run: |

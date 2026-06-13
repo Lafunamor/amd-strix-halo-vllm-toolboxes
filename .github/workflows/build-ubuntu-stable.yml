@@ -198,8 +198,12 @@ jobs:
             VLLM_REF=${{ steps.ver.outputs.vllm_ref }}
           provenance: false
           sbom: false
+          # mode=max exports cache for ALL stages incl. the multi-stage builder
+          # (apt, torch download, build deps, vLLM compile). With mode=min only
+          # the final runtime stage is cached, so the builder rebuilds from
+          # scratch every run — defeating reuse when only vLLM changed.
           cache-from: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache
-          cache-to: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache,mode=min,image-manifest=true,oci-mediatypes=true
+          cache-to: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
 
       - name: Push image (with retries)
         if: steps.check.outputs.skip != 'true'
