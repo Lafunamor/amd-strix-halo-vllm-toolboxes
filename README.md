@@ -2,6 +2,8 @@
 
 An **Fedora 43** Docker/Podman container that is **Toolbx-compatible** (usable as a Fedora toolbox) for serving LLMs with **vLLM** on **AMD Ryzen AI Max “Strix Halo” (gfx1151)**. Built on the **TheRock nightly builds** for ROCm.
 
+> Also available: **Ubuntu + official stable-ROCm** image variants (daily-rebuilt and bleeding-edge) — see [Image Variants](#image-variants).
+
 ---
 
 ## 🚀 High-Performance Clustering Support (New!)
@@ -29,6 +31,7 @@ This is a hobby project maintained in my spare time. If you find these toolboxes
 
 ## Table of Contents
 
+* [Image Variants](#image-variants)
 * [Tested Models (Benchmarks)](#tested-models-benchmarks)
 * [1) Toolbx vs Docker/Podman](#1-toolbx-vs-dockerpodman)
 * [2) Quickstart — Fedora Toolbx](#2-quickstart--fedora-toolbx)
@@ -38,6 +41,28 @@ This is a hobby project maintained in my spare time. If you find these toolboxes
 * [6) Host Configuration](#6-host-configuration)
 * [7) Distributed Clustering (RDMA/RoCE)](#7-distributed-clustering-rdmaroce)
 
+
+## Image Variants
+
+Three image families are published for gfx1151, each aimed at a different need:
+
+| Image | Base / ROCm | vLLM | Cadence | Tags | Use it for |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `kyuz0/vllm-therock-gfx1151` | Fedora 43 + **TheRock** ROCm nightlies | upstream `main` | manual | `:stable`, `:latest` | The original toolbox, with the custom RDMA/RoCE cluster build. Recommended default for most users. |
+| `vllm-rocm-gfx1151` | Ubuntu 24.04 + official **stable** ROCm | latest stable release tag | **daily** (auto; rebuilds only when the version combo changes) | `:latest`, `:rocm<X>-torch<Y>-vllm<Z>`, `:<date>` | A reproducible build off the nightly treadmill. The version-stamped tag pins an exact, immutable ROCm/torch/vLLM combo. |
+| `vllm-rocm-gfx1151-nightly` | Ubuntu 24.04 + official stable ROCm | **bleeding-edge** vLLM `main` | manual only | `:latest`, `:<date-time>` | Trying brand-new model archs/features that need vLLM `main` before they reach a stable tag (e.g. block-diffusion DiffusionGemma). |
+
+> The two `vllm-rocm-*` (Ubuntu / stable-ROCm) images are currently published under the [`lafunamor`](https://hub.docker.com/u/lafunamor) namespace as a test-drive (see [PR #63](https://github.com/kyuz0/amd-strix-halo-vllm-toolboxes/pull/63)). Their build workflows derive the Docker Hub repo from the GitHub owner, so they would publish under `kyuz0/` automatically if merged upstream.
+
+Pin an exact, reproducible stack with the version-stamped tag, e.g.:
+
+```bash
+docker pull docker.io/lafunamor/vllm-rocm-gfx1151:rocm7.2.4-torch2.12.0-vllm0.23.0   # immutable combo
+docker pull docker.io/lafunamor/vllm-rocm-gfx1151:latest                            # most recent stable daily
+docker pull docker.io/lafunamor/vllm-rocm-gfx1151-nightly:latest                    # latest manual bleeding-edge build
+```
+
+---
 
 ## Tested Models (Benchmarks)
 
