@@ -329,6 +329,20 @@ except Exception:
             p_rocm_plat.write_text(txt)
             print(" -> Patched vllm/platforms/rocm.py (ROCM-21812 APU VRAM Dynamic Margin)")
 
+    # Patch 11: moe_wna16.py — fix tp_size AttributeError on RoutedExperts
+    # vLLM refactored FusedMoE and moved tp_size out of RoutedExperts (the
+    # weight container) into FusedMoEConfig. But moe_wna16_weight_loader still
+    # accesses `layer.tp_size` which crashes AWQ MoE models (Qwen3.5 etc.)
+    # that fall back from AWQMoeMarlin to the WNA16 path.
+    # Fix: use get_tp_group().world_size which is always available.
+    p_moe_wna16 = Path('vllm/model_executor/layers/quantization/moe_wna16.py')
+    if p_moe_wna16.exists():
+        txt = p_moe_wna16.read_text()
+        if 'layer.tp_size' in txt:
+            txt = txt.replace('layer.tp_size', 'get_tp_group().world_size')
+            p_moe_wna16.write_text(txt)
+            print(" -> Patched moe_wna16.py (layer.tp_size -> get_tp_group().world_size)")
+
     print("Successfully patched vLLM/Environment for Strix Halo.")
 
 if __name__ == "__main__":
