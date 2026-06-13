@@ -1,0 +1,228 @@
+name: build-ubuntu-stable
+
+# Parallel, non-breaking pipeline for the greenfield Ubuntu + official-ROCm
+# image (Dockerfile.ubuntu). Publishes to a DIFFERENT repo than the TheRock
+# pipeline (build-and-publish.yml -> *vllm-therock-gfx1151*), so the two tracks
+# never collide:
+#   - vllm-therock-gfx1151  : Fedora + TheRock ROCm nightlies (existing)
+#   - vllm-rocm-gfx1151      : Ubuntu + official stable ROCm (this one)
+#
+# The image repo is derived from the repo OWNER, so this same file publishes to
+# the fork's Docker Hub when it runs on the fork (lafunamor/...) and to kyuz0's
+# if it ever lands upstream (kyuz0/...). No hard-coded namespace.
+#
+# DAILY cron chases all-latest and rebuilds ONLY when the resolved combination
+# changed:
+#   - vLLM  -> latest stable release tag (resolved at build time)
+#   - torch -> latest wheel in the rocm7.2 stable channel
+#   - ROCm  -> the pinned base image (rocm/dev-ubuntu-24.04:<ver>-complete);
+#              this is the one deliberate anchor, because the torch wheel
+#              channel (TORCH_INDEX) must match the ROCm minor. Bump both
+#              together when moving ROCm.
+# The three resolved versions are baked into an immutable tag
+# (rocm<X>-torch<Y>-vllm<Z>); if that tag already exists in the registry the
+# build is skipped, so an unchanged day is a cheap no-op.
+
+on:
+  schedule:
+    # Daily 06:00 UTC — chase latest, build only if the combo changed
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      vllm_ref:
+        description: "vLLM tag/commit to build (empty = latest stable release tag)"
+        required: false
+        default: ""
+      force:
+        description: "Rebuild even if the version tag already exists"
+        type: boolean
+        required: false
+        default: false
+
+env:
+  DOCKER_BUILDKIT: "1"
+  # ROCm anchor + matching torch wheel channel (bump these two together).
+  ROCM_BASE: docker.io/rocm/dev-ubuntu-24.04:7.2.4-complete
+  TORCH_INDEX: https://download.pytorch.org/whl/rocm7.2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image repo (from owner)
+        id: repo
+        run: |
+          set -euo pipefail
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          REPO="${OWNER}/vllm-rocm-gfx1151"
+          echo "Image repo: docker.io/${REPO}"
+          echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve latest versions
+        id: ver
+        run: |
+          set -euo pipefail
+          # ROCm version from the pinned base image tag (e.g. 7.2.4).
+          ROCM_VER=$(echo "${ROCM_BASE}" | sed -E 's/.*:([0-9][0-9.]*)-complete$/\1/')
+          # torch: latest cp312 wheel in the rocm channel (e.g. 2.12.0+rocm7.2).
+          TORCH_FULL=$(curl -fsSL "${TORCH_INDEX}/torch/" \
+            | grep -oE 'torch-[0-9][0-9.]*\+rocm[0-9.]+-cp312' \
+            | sed -E 's/^torch-//; s/-cp312$//' \
+            | sort -V | tail -n1)
+          TORCH_VER="${TORCH_FULL%%+*}"
+          # vLLM: manual override, else latest stable release tag (skip rc/dev/a/b).
+          VLLM_REF="${{ github.event.inputs.vllm_ref }}"
+          if [ -z "$VLLM_REF" ]; then
+            VLLM_REF=$(git ls-remote --tags --refs https://github.com/vllm-project/vllm.git \
+              | awk '{print $2}' | sed 's#refs/tags/##' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V | tail -n1)
+          fi
+          if [ -z "$ROCM_VER" ] || [ -z "$TORCH_FULL" ] || [ -z "$VLLM_REF" ]; then
+            echo "Failed to resolve versions: rocm='$ROCM_VER' torch='$TORCH_FULL' vllm='$VLLM_REF'" >&2
+            exit 1
+          fi
+          # vLLM slug for the tag: strip leading v, keep alnum/._-.
+          VLLM_SLUG=$(echo "${VLLM_REF#v}" | sed 's/[^A-Za-z0-9._-]/-/g' | cut -c1-24)
+          VERSION_TAG="rocm${ROCM_VER}-torch${TORCH_VER}-vllm${VLLM_SLUG}"
+          echo "rocm=${ROCM_VER}"            >> "$GITHUB_OUTPUT"
+          echo "torch_full=${TORCH_FULL}"    >> "$GITHUB_OUTPUT"
+          echo "vllm_ref=${VLLM_REF}"        >> "$GITHUB_OUTPUT"
+          echo "version_tag=${VERSION_TAG}"  >> "$GITHUB_OUTPUT"
+          echo "Resolved: ${VERSION_TAG} (vLLM ref ${VLLM_REF}, torch ${TORCH_FULL})"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Check if combo already built
+        id: check
+        run: |
+          set -uo pipefail
+          REF="docker.io/${{ steps.repo.outputs.repo }}:${{ steps.ver.outputs.version_tag }}"
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            echo "force=true -> rebuilding regardless"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif docker buildx imagetools inspect "$REF" >/dev/null 2>&1; then
+            echo "✅ $REF already exists — nothing changed, skipping build"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "🆕 $REF not found — building"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Put Docker on /mnt
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          set -eux
+          echo '{ "data-root": "/mnt/docker" }' | sudo tee /etc/docker/daemon.json
+          sudo systemctl stop docker
+          sudo rm -rf /var/lib/docker || true
+          sudo mkdir -p /mnt/docker
+          sudo systemctl start docker
+          docker info | grep "Docker Root Dir"
+          # docker daemon was restarted onto /mnt — re-auth for the push.
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Free disk space
+        if: steps.check.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "Disk BEFORE:"; df -h
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/go || true
+          docker system prune -af || true
+          docker builder prune -af || true
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /opt/hostedtoolcache
+          echo "Disk AFTER:"; df -h
+
+      - name: Set up QEMU
+        if: steps.check.outputs.skip != 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: BuildKit GC config (8GB cap)
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          cat > /tmp/buildkitd.toml <<'EOF'
+          [worker.oci]
+            gc = true
+            gckeepstorage = 8000   # MB
+          EOF
+
+      - name: Set up Buildx (with GC)
+        if: steps.check.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: --config /tmp/buildkitd.toml
+
+      - name: Docker meta
+        if: steps.check.outputs.skip != 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: docker.io/${{ steps.repo.outputs.repo }}
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.version_tag }}
+            type=raw,value=latest
+            type=raw,value={{date 'YYYYMMDD-HHmmss'}}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.ver.outputs.version_tag }}
+
+      - name: Build image (no push)
+        if: steps.check.outputs.skip != 'true'
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.ubuntu
+          platforms: linux/amd64
+          push: false
+          load: true
+          pull: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ROCM_BASE=${{ env.ROCM_BASE }}
+            TORCH_INDEX=${{ env.TORCH_INDEX }}
+            TORCH_VERSION=${{ steps.ver.outputs.torch_full }}
+            VLLM_REF=${{ steps.ver.outputs.vllm_ref }}
+          provenance: false
+          sbom: false
+          cache-from: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache
+          cache-to: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache,mode=min,image-manifest=true,oci-mediatypes=true
+
+      - name: Push image (with retries)
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          set -eux
+          TAGS="${{ steps.meta.outputs.tags }}"
+          for tag in $TAGS; do
+            for attempt in 1 2 3; do
+              echo "Pushing $tag (attempt $attempt/3)..."
+              if docker push "$tag"; then
+                echo "✅ Pushed $tag"
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "❌ Failed to push $tag after 3 attempts"
+                exit 1
+              fi
+              echo "⏳ Retrying in 30s..."
+              sleep 30
+            done
+          done
+
+      - name: Prune buildx cache
+        if: always()
+        run: |
+          docker buildx prune -af --verbose --min-free-space 4gb || true
