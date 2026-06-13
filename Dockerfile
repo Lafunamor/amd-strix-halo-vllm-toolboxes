@@ -103,6 +103,15 @@ ENV MAX_JOBS="4"
 ENV CC="/opt/rocm/llvm/bin/clang"
 ENV CXX="/opt/rocm/llvm/bin/clang++"
 
+# Recent vLLM main ships PyO3/Rust extension modules (vllm/_rust_*.so) for the
+# tool-call/reasoning parsers and tokenizer helpers. Building the wheel now
+# requires a Rust toolchain plus the setuptools-rust backend, otherwise the
+# build fails in metadata prep with "ModuleNotFoundError: No module named
+# 'setuptools_rust'". Installed right before the vLLM build so the expensive
+# flash-attention/AITER layers above stay cacheable.
+RUN dnf install -y rust cargo && dnf clean all && rm -rf /var/cache/dnf/* && \
+  python -m pip install "setuptools-rust>=1.9.0" && rm -rf /root/.cache/pip
+
 RUN export HIP_DEVICE_LIB_PATH=$(find /opt/rocm -type d -name bitcode -print -quit) && \
   echo "Compiling with Bitcode: $HIP_DEVICE_LIB_PATH" && \
   export CMAKE_ARGS="-DROCM_PATH=/opt/rocm -DHIP_PATH=/opt/rocm -DAMDGPU_TARGETS=gfx1151 -DHIP_ARCHITECTURES=gfx1151" && \   
