@@ -63,7 +63,7 @@ RUN git clone https://github.com/ROCm/flash-attention.git && \
     python -c "import re; f=open('setup.py','r'); t=f.read(); f.close(); t=re.sub(r'subprocess\.run\([\s\S]*?third_party/aiter[\s\S]*?check=True,\s*\)', 'pass # patched', t); f=open('setup.py','w'); f.write(t)" && \
     pip install --no-build-isolation --no-deps . && \
     cd /opt && rm -rf /opt/flash-attention /opt/patch_aiter_headers.py && \
-    find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true && \
+    (find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true) && \
     rm -rf /root/.cache/pip
 
 # Fix Fedora lib vs lib64 split: setup.py install writes to lib/, pip to lib64/.
@@ -149,12 +149,12 @@ RUN cmake -S . \
   && \
   make -j$(nproc) && \
   python -m pip install --no-cache-dir . --no-build-isolation --no-deps && \
-  find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true && \
+  (find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true) && \
   rm -rf /root/.cache/pip
 
 # 8. Final Cleanup & Runtime
 WORKDIR /opt
-RUN find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true && \
+RUN (find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true) && \
   find /opt/venv -type d -name "__pycache__" -prune -exec rm -rf {} + && \
   rm -rf /root/.cache/pip || true && \
   dnf clean all && rm -rf /var/cache/dnf/*
