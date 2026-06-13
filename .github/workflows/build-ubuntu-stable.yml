@@ -1,0 +1,175 @@
+name: build-ubuntu-stable
+
+# Parallel, non-breaking pipeline for the greenfield Ubuntu + official-ROCm
+# image (Dockerfile.ubuntu). Publishes to a DIFFERENT repo than the TheRock
+# pipeline (build-and-publish.yml -> *vllm-therock-gfx1151*), so the two tracks
+# never collide:
+#   - vllm-therock-gfx1151  : Fedora + TheRock ROCm nightlies (existing)
+#   - vllm-rocm-gfx1151      : Ubuntu + official stable ROCm 7.2.4 (this one)
+#
+# The weekly cron refreshes ALL moving dependencies and rebuilds:
+#   - vLLM         -> latest stable release tag, resolved at build time
+#   - torch/ROCm   -> latest in the rocm7.2 stable wheel channel + --pull on the
+#                     rocm/dev-ubuntu-24.04:7.2.4-complete base and apt packages
+# A manual run can pin vllm_ref to any tag/commit (e.g. an edge commit for
+# main-only models like DiffusionGemma) without touching the cron default.
+
+on:
+  schedule:
+    # Mondays 06:00 UTC — weekly dependency refresh + rebuild
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Base image tag to publish"
+        required: true
+        default: "stable"
+      vllm_ref:
+        description: "vLLM tag/commit to build (empty = latest stable release tag)"
+        required: false
+        default: ""
+
+env:
+  IMAGE_REPO: kyuz0/vllm-rocm-gfx1151
+  DOCKER_BUILDKIT: "1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Put Docker on /mnt
+        run: |
+          set -eux
+          echo '{ "data-root": "/mnt/docker" }' | sudo tee /etc/docker/daemon.json
+          sudo systemctl stop docker
+          sudo rm -rf /var/lib/docker || true
+          sudo mkdir -p /mnt/docker
+          sudo systemctl start docker
+          docker info | grep "Docker Root Dir"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "Disk BEFORE:"; df -h
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/go || true
+          docker system prune -af || true
+          docker builder prune -af || true
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /opt/hostedtoolcache
+          echo "Disk AFTER:"; df -h
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: BuildKit GC config (8GB cap)
+        run: |
+          cat > /tmp/buildkitd.toml <<'EOF'
+          [worker.oci]
+            gc = true
+            gckeepstorage = 8000   # MB
+          EOF
+
+      - name: Set up Buildx (with GC)
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: --config /tmp/buildkitd.toml
+
+      - name: Resolve base tag
+        id: basetag
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          [ -z "$TAG" ] && TAG="stable"
+          echo "Base tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve vLLM ref
+        id: vllm-ref
+        run: |
+          set -euo pipefail
+          REF="${{ github.event.inputs.vllm_ref }}"
+          if [ -z "$REF" ]; then
+            # Latest stable vLLM release tag (vMAJOR.MINOR.PATCH only — skip rc/dev/a/b).
+            REF=$(git ls-remote --tags --refs https://github.com/vllm-project/vllm.git \
+                  | awk '{print $2}' | sed 's#refs/tags/##' \
+                  | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+                  | sort -V | tail -n1)
+          fi
+          if [ -z "$REF" ]; then
+            echo "Failed to resolve a vLLM ref" >&2
+            exit 1
+          fi
+          # Short, tag-safe slug for the image tag (strip refs/, keep alnum/._-).
+          SLUG=$(echo "$REF" | sed 's/[^A-Za-z0-9._-]/-/g' | cut -c1-32)
+          echo "Resolved vLLM ref: $REF (slug: $SLUG)"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: docker.io/${{ env.IMAGE_REPO }}
+          tags: |
+            type=raw,value=${{ steps.basetag.outputs.tag }}
+            type=sha
+            type=raw,value={{date 'YYYYMMDD-HHmmss'}}
+            type=raw,value=${{ steps.basetag.outputs.tag }}-vllm-${{ steps.vllm-ref.outputs.slug }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build image (no push)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.ubuntu
+          platforms: linux/amd64
+          push: false
+          load: true
+          pull: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VLLM_REF=${{ steps.vllm-ref.outputs.ref }}
+          provenance: false
+          sbom: false
+          cache-from: type=registry,ref=docker.io/${{ env.IMAGE_REPO }}:buildcache
+          cache-to: type=registry,ref=docker.io/${{ env.IMAGE_REPO }}:buildcache,mode=min,image-manifest=true,oci-mediatypes=true
+
+      - name: Push image (with retries)
+        run: |
+          set -eux
+          TAGS="${{ steps.meta.outputs.tags }}"
+          for tag in $TAGS; do
+            for attempt in 1 2 3; do
+              echo "Pushing $tag (attempt $attempt/3)..."
+              if docker push "$tag"; then
+                echo "✅ Pushed $tag"
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "❌ Failed to push $tag after 3 attempts"
+                exit 1
+              fi
+              echo "⏳ Retrying in 30s..."
+              sleep 30
+            done
+          done
+
+      - name: Prune buildx cache
+        if: always()
+        run: |
+          docker buildx prune -af --verbose --min-free-space 4gb || true
