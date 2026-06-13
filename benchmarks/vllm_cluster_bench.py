@@ -458,7 +458,7 @@ if __name__ == "__main__":
             default_seqs = config.get("max_num_seqs", "16")
             default_tokens = config.get("max_tokens", DEFAULT_BATCH_TOKENS)
             default_util = config.get("gpu_util", GPU_UTIL)
-            default_ctx = "auto"
+            default_ctx = config.get("ctx", "auto")
             
             form_args = [
                 "--clear", "--backtitle", f"AMD VLLM Cluster Benchmark Configuration (TP: {CLUSTER_TP})",

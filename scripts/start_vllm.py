@@ -82,8 +82,9 @@ def get_verified_config(model_id, tp_size, max_seqs):
     Reads max_context_results.json to find the best verified configuration.
     Returns dict: {'ctx': int, 'util': float}
     """
+    model_ctx_default = MODEL_TABLE[model_id].get("ctx", "auto")
     default_config = {
-        "ctx": "auto",
+        "ctx": model_ctx_default,
         "util": 0.90 # Safe default
     }
     

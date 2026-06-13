@@ -131,6 +131,21 @@ MODEL_TABLE = {
         ]
     },
 
+    "ayysasha/MiniMax-M2.7-AWQ-G32-STRIX-2H": {
+        "trust_remote": True,
+        "valid_tp": [2],
+        "enforce_eager": False,
+        "env": {"VLLM_USE_TRITON_AWQ": "1"},
+        "ctx": "126000",
+        "max_num_seqs": "64",
+        "max_tokens": "16384",
+        "extra_flags": [
+            "--enable-auto-tool-choice",
+            "--tool-call-parser", "minimax_m2",
+            "--reasoning-parser", "minimax_m2_append_think",
+        ]
+    },
+
 }
 
 MODELS_TO_RUN = list(MODEL_TABLE.keys())
