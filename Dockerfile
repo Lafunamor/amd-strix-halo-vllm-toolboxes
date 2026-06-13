@@ -27,15 +27,11 @@ RUN printf 'source /opt/venv/bin/activate\n' > /etc/profile.d/venv.sh
 RUN python -m pip install --upgrade pip wheel packaging "setuptools<80.0.0"
 
 # 5. Install PyTorch (TheRock Nightly)
-# Pin the ROCm nightly torch to a known-good build instead of floating on
-# latest. The 7.14.0a20260611+ nightlies segfault during HIP runtime init on
-# gfx1151 (torch.cuda.is_available() dies with SIGSEGV); 20260608 is the
-# newest validated build. Bump deliberately after testing, via
-# --build-arg TORCH_ROCM_VERSION=<version> or by editing the default.
+# Pin to known good version
 ARG TORCH_ROCM_VERSION=2.13.0a0+rocm7.14.0a20260608
 RUN python -m pip install \
   --index-url https://rocm.nightlies.amd.com/v2-staging/gfx1151/ \
-  --pre "torch==${TORCH_ROCM_VERSION}" torchaudio torchvision && \
+  --pre torch torchaudio torchvision && \
   (find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true) && \
   rm -rf /root/.cache/pip
 
@@ -50,21 +46,21 @@ ENV FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE"
 ENV LD_LIBRARY_PATH="/opt/rocm/lib:/opt/rocm/lib64:$LD_LIBRARY_PATH"
 
 RUN git clone https://github.com/ROCm/flash-attention.git && \
-    cd flash-attention && \
-    git checkout main_perf && \
-    git submodule update --init third_party/aiter && \
-    cd third_party/aiter && \
-    git submodule update --init 3rdparty/composable_kernel && \
-    export CK_DIR="$(pwd)/3rdparty/composable_kernel" && \
-    python -m pip wheel --no-build-isolation --no-deps -w /tmp/dist -v . && \
-    python -m pip install --force-reinstall /tmp/dist/amd_aiter*.whl && \
-    python /opt/patch_aiter_headers.py && \
-    cd /opt/flash-attention && \
-    python -c "import re; f=open('setup.py','r'); t=f.read(); f.close(); t=re.sub(r'subprocess\.run\([\s\S]*?third_party/aiter[\s\S]*?check=True,\s*\)', 'pass # patched', t); f=open('setup.py','w'); f.write(t)" && \
-    pip install --no-build-isolation --no-deps . && \
-    cd /opt && rm -rf /opt/flash-attention /opt/patch_aiter_headers.py && \
-    (find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true) && \
-    rm -rf /root/.cache/pip
+  cd flash-attention && \
+  git checkout main_perf && \
+  git submodule update --init third_party/aiter && \
+  cd third_party/aiter && \
+  git submodule update --init 3rdparty/composable_kernel && \
+  export CK_DIR="$(pwd)/3rdparty/composable_kernel" && \
+  python -m pip wheel --no-build-isolation --no-deps -w /tmp/dist -v . && \
+  python -m pip install --force-reinstall /tmp/dist/amd_aiter*.whl && \
+  python /opt/patch_aiter_headers.py && \
+  cd /opt/flash-attention && \
+  python -c "import re; f=open('setup.py','r'); t=f.read(); f.close(); t=re.sub(r'subprocess\.run\([\s\S]*?third_party/aiter[\s\S]*?check=True,\s*\)', 'pass # patched', t); f=open('setup.py','w'); f.write(t)" && \
+  pip install --no-build-isolation --no-deps . && \
+  cd /opt && rm -rf /opt/flash-attention /opt/patch_aiter_headers.py && \
+  (find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true) && \
+  rm -rf /root/.cache/pip
 
 # Fix Fedora lib vs lib64 split: setup.py install writes to lib/, pip to lib64/.
 # flash-attention's find_packages() may install a partial aiter copy into lib/.
@@ -73,12 +69,12 @@ RUN git clone https://github.com/ROCm/flash-attention.git && \
 # site-packages dirs resolve to the same path — skip the merge, since the
 # cp-into-self then rm-rf would delete the entire aiter package.
 RUN lib_sp=/opt/venv/lib/python3.12/site-packages; \
-    lib64_sp=/opt/venv/lib64/python3.12/site-packages; \
-    if [ "$(readlink -f "$lib_sp")" != "$(readlink -f "$lib64_sp")" ] && \
-       [ -d "$lib_sp/aiter" ]; then \
-      cp -rn "$lib_sp/aiter/"* "$lib64_sp/aiter/" 2>/dev/null || true; \
-      rm -rf "$lib_sp/aiter"; \
-    fi
+  lib64_sp=/opt/venv/lib64/python3.12/site-packages; \
+  if [ "$(readlink -f "$lib_sp")" != "$(readlink -f "$lib64_sp")" ] && \
+  [ -d "$lib_sp/aiter" ]; then \
+  cp -rn "$lib_sp/aiter/"* "$lib64_sp/aiter/" 2>/dev/null || true; \
+  rm -rf "$lib_sp/aiter"; \
+  fi
 
 # 6. Clone vLLM
 # Optional: pin to a specific vLLM commit for reproducible builds.
@@ -87,8 +83,8 @@ ARG VLLM_COMMIT=
 RUN git clone https://github.com/vllm-project/vllm.git /opt/vllm
 WORKDIR /opt/vllm
 RUN if [ -n "$VLLM_COMMIT" ]; then \
-      echo "Pinning vLLM to commit $VLLM_COMMIT" && git checkout "$VLLM_COMMIT"; \
-    fi
+  echo "Pinning vLLM to commit $VLLM_COMMIT" && git checkout "$VLLM_COMMIT"; \
+  fi
 
 # --- PATCHING ---
 COPY scripts/patch_strix.py /opt/vllm/patch_strix.py
@@ -101,10 +97,7 @@ ENV VLLM_TARGET_DEVICE="rocm"
 ENV PYTORCH_ROCM_ARCH="gfx1151"
 ENV HIP_ARCHITECTURES="gfx1151"          
 ENV AMDGPU_TARGETS="gfx1151"              
-# Parallel build jobs. Default tuned for the GitHub Actions runner (~7 GB RAM);
-# override with --build-arg MAX_JOBS=N when building locally on larger machines.
-ARG MAX_JOBS=4
-ENV MAX_JOBS=${MAX_JOBS}
+ENV MAX_JOBS="4"
 
 # --- CRITICAL FIX FOR SEGFAULT ---
 # We force the Host Compiler (CC/CXX) to be the ROCm Clang, not Fedora GCC.
@@ -112,10 +105,12 @@ ENV MAX_JOBS=${MAX_JOBS}
 ENV CC="/opt/rocm/llvm/bin/clang"
 ENV CXX="/opt/rocm/llvm/bin/clang++"
 
-# vLLM main (>= 2026-06) ships PyO3/Rust extensions (vllm/_rust_*.so) and
-# needs a Rust toolchain + setuptools-rust at wheel-build time. Installed here
-# rather than with the early build deps so the expensive flash-attention/AITER
-# layers above stay cacheable.
+# Recent vLLM main ships PyO3/Rust extension modules (vllm/_rust_*.so) for the
+# tool-call/reasoning parsers and tokenizer helpers. Building the wheel now
+# requires a Rust toolchain plus the setuptools-rust backend, otherwise the
+# build fails in metadata prep with "ModuleNotFoundError: No module named
+# 'setuptools_rust'". Installed right before the vLLM build so the expensive
+# flash-attention/AITER layers above stay cacheable.
 RUN dnf install -y rust cargo && dnf clean all && rm -rf /var/cache/dnf/* && \
   python -m pip install "setuptools-rust>=1.9.0" && rm -rf /root/.cache/pip
 
@@ -184,25 +179,5 @@ RUN chmod +x /opt/start-vllm /opt/start-vllm-cluster /opt/vllm_cluster_bench.py 
 RUN chmod 0644 /etc/profile.d/*.sh
 RUN printf 'ulimit -S -c 0\n' > /etc/profile.d/90-nocoredump.sh && chmod 0644 /etc/profile.d/90-nocoredump.sh
 
-# 9. Install Custom RCCL (gfx1151) - Replaces standard library with manually built one
-# Gated behind CUSTOM_RCCL because the prebuilt librccl artifact (April 2026)
-# predates the ncclCommResume API that current torch nightlies link against —
-# installing it makes `import torch` fail with an undefined-symbol error.
-# Default OFF: single-node use needs only the stock RCCL shipped with the
-# ROCm SDK. Re-enable with --build-arg CUSTOM_RCCL=1 once librccl has been
-# rebuilt against the current nightly (needed for RDMA/RoCE TP=2 clustering).
-ARG CUSTOM_RCCL=0
-COPY custom_libs/librccl.so.1.gz /tmp/librccl.so.1.gz
-RUN if [ "$CUSTOM_RCCL" = "1" ]; then \
-    echo "Installing Custom RCCL..." && \
-    gzip -d /tmp/librccl.so.1.gz && \
-    chmod 755 /tmp/librccl.so.1 && \
-    cp -fv /tmp/librccl.so.1 /opt/rocm/lib/librccl.so.1.0 && \
-    find /opt/venv -name "librccl.so.1" -exec cp -fv /tmp/librccl.so.1 {} + && \
-    rm /tmp/librccl.so.1; \
-  else \
-    echo "Skipping Custom RCCL (CUSTOM_RCCL=0) — stock ROCm SDK RCCL retained" && \
-    rm /tmp/librccl.so.1.gz; \
-  fi
 
 CMD ["/bin/bash"]

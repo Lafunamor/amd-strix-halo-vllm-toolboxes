@@ -7,12 +7,14 @@ def patch_vllm():
     print("Applying Strix Halo patches to vLLM (ai-notes modernization)...")
 
     # Patch 0: csrc/spinloop.cpp (clang-compatible mwaitx include)
-    # spinloop.cpp (vLLM #36517) includes <mwaitxintrin.h> directly, which
-    # ROCm clang hard-errors on ("Never use <mwaitxintrin.h> directly;
-    # include <x86intrin.h> instead"). GCC tolerates it, so upstream CI never
-    # sees the break — but this toolbox builds with CC/CXX=ROCm clang for ABI
-    # alignment with PyTorch. <x86intrin.h> is the umbrella header accepted
-    # by both compilers. No-ops once vLLM fixes it upstream.
+    # spinloop.cpp includes <mwaitxintrin.h> directly. ROCm clang rejects that
+    # with a hard #error ("Never use <mwaitxintrin.h> directly; include
+    # <x86intrin.h> instead."). GCC tolerates it, so vLLM upstream CI never sees
+    # the break — but this toolbox builds vLLM with CC/CXX=ROCm clang (for ABI
+    # alignment with PyTorch), so the spinloop target fails to compile.
+    # <x86intrin.h> is the umbrella header accepted by both compilers and still
+    # exposes the MONITORX/MWAITX intrinsics. Guarded so it no-ops once vLLM
+    # fixes it upstream or removes the file.
     p_spinloop = Path('csrc/spinloop.cpp')
     if p_spinloop.exists():
         txt = p_spinloop.read_text()
