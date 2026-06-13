@@ -178,7 +178,11 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ steps.ver.outputs.version_tag }}
 
-      - name: Build image (no push)
+      # Push directly from buildx (no `load`): streams compressed layers to the
+      # registry without ever materializing the full ~26GB image as a local
+      # tarball + extracted daemon copy. `load: true` did exactly that and blew
+      # the runner's disk ("no space left" while importing to docker).
+      - name: Build & push image
         if: steps.check.outputs.skip != 'true'
         id: build
         uses: docker/build-push-action@v6
@@ -186,8 +190,7 @@ jobs:
           context: .
           file: ./Dockerfile.ubuntu
           platforms: linux/amd64
-          push: false
-          load: true
+          push: true
           pull: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -204,27 +207,6 @@ jobs:
           # scratch every run — defeating reuse when only vLLM changed.
           cache-from: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache
           cache-to: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
-
-      - name: Push image (with retries)
-        if: steps.check.outputs.skip != 'true'
-        run: |
-          set -eux
-          TAGS="${{ steps.meta.outputs.tags }}"
-          for tag in $TAGS; do
-            for attempt in 1 2 3; do
-              echo "Pushing $tag (attempt $attempt/3)..."
-              if docker push "$tag"; then
-                echo "✅ Pushed $tag"
-                break
-              fi
-              if [ "$attempt" -eq 3 ]; then
-                echo "❌ Failed to push $tag after 3 attempts"
-                exit 1
-              fi
-              echo "⏳ Retrying in 30s..."
-              sleep 30
-            done
-          done
 
       - name: Prune buildx cache
         if: always()
