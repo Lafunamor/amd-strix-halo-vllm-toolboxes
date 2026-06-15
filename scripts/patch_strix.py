@@ -123,7 +123,6 @@ def patch_vllm():
             p_unquant.write_text(txt)
             print(" -> Patched unquantized.py (Blocked AITER MoE override on gfx1x)")
 
-
     # Patch 5: custom_ops RMSNorm block on gfx1x (Full CUDA Graph capture)
     p_rocm = Path('vllm/platforms/rocm.py')
     if p_rocm.exists():
@@ -253,82 +252,6 @@ if _os.path.isdir(_jit_cache) and _jit_cache not in __path__:
             p_triton.write_text(txt)
             print(f" -> Patched {p_triton} (Triton MoE on gfx11xx)")
 
-    # Patch 10: ROCM-21812 APU VRAM Dynamic Margin Patch
-    # Explanation: ROCm nightly builds introduced a 50% APU VRAM clamp to prevent
-    # OOM kernel panics on headless hosts. This broke vLLM large model loading.
-    # This patch intercepts PyTorch memory bounds and dynamically proxies the 
-    # real amdgpu hardware GTT limits, minus a strict 8GB OS safety margin.
-    # By symmetrically carving the OS margin from the top of the GTT ceiling, 
-    # vLLM's memory profiler allocates flawlessly while guaranteeing the OS stays alive,
-    # regardless of the specific GTT allocation size on the host.
-    # Ref: https://github.com/ROCm/rocm-systems/pull/5113
-    # TODO: Remove this patch block entirely once PR #5113 merges and is 
-    # incorporated into the ROCm nightly tarballs used by this toolbox.
-    p_rocm_plat = Path('vllm/platforms/rocm.py')
-    if p_rocm_plat.exists():
-        txt = p_rocm_plat.read_text()
-        if "_patched_mem_info" not in txt:
-            mem_patch = '''
-# --- ROCM-21812 VRAM DYNAMIC PATCH ---
-import torch
-import glob
-import os
-
-try:
-    _orig_mem_info = torch.cuda.mem_get_info
-    _orig_get_dev_prop = torch.cuda.get_device_properties
-
-    class MockCudaDeviceProperties:
-        def __init__(self, prop, override_total):
-            self._prop = prop
-            self.total_memory = override_total
-        def __getattr__(self, name):
-            return getattr(self._prop, name)
-        def __dir__(self):
-            return dir(self._prop)
-
-    def _patched_mem_info(device=None):
-        free, total = _orig_mem_info(device)
-        try:
-            # On APUs, ROCm clamps total to 50% limit. We need the real GTT limits.
-            if total < 70 * 1024**3: 
-                drm_cards = glob.glob('/sys/class/drm/card*/device/mem_info_gtt_total')
-                if drm_cards:
-                    card_dir = os.path.dirname(drm_cards[0])
-                    with open(os.path.join(card_dir, 'mem_info_gtt_total'), 'r') as f:
-                        gtt_total = int(f.read().strip())
-                    with open(os.path.join(card_dir, 'mem_info_gtt_used'), 'r') as f:
-                        gtt_used = int(f.read().strip())
-                    
-                    # Symmetrically carve 8GB off the TOP of the device perfectly.
-                    safe_ceiling = gtt_total - (8 * 1024**3)
-                    
-                    real_total = safe_ceiling
-                    real_free = max(0, safe_ceiling - gtt_used)
-                    
-                    total = max(total, real_total)
-                    free = real_free
-        except Exception as e:
-            pass
-        return int(free), int(total)
-
-    def _patched_get_dev_prop(device=None):
-        prop = _orig_get_dev_prop(device)
-        free, total = _patched_mem_info(device)
-        if hasattr(prop, 'total_memory') and prop.total_memory < total:
-            return MockCudaDeviceProperties(prop, total)
-        return prop
-
-    torch.cuda.mem_get_info = _patched_mem_info
-    torch.cuda.get_device_properties = _patched_get_dev_prop
-except Exception:
-    pass
-# ---------------------------
-'''
-            txt = mem_patch + txt
-            p_rocm_plat.write_text(txt)
-            print(" -> Patched vllm/platforms/rocm.py (ROCM-21812 APU VRAM Dynamic Margin)")
-
     # Patch 11: moe_wna16.py — fix tp_size AttributeError on RoutedExperts
     # vLLM refactored FusedMoE and moved tp_size out of RoutedExperts (the
     # weight container) into FusedMoEConfig. But moe_wna16_weight_loader still
@@ -343,6 +266,40 @@ except Exception:
             txt = txt.replace('layer.tp_size', 'get_tp_group().world_size')
             p_moe_wna16.write_text(txt)
             print(" -> Patched moe_wna16.py (layer.tp_size -> get_tp_group().world_size)")
+
+    # Patch 11: RocmPlatform.is_integrated_gpu override (smart UMA detection)
+    # Upstream vLLM PR #35356 (merged 2026-04-13) added Platform.is_integrated_gpu()
+    # and made MemorySnapshot.measure() use psutil.virtual_memory().available for free
+    # memory on UMA devices (hipMemGetInfo ignores OS-reclaimable memory there -> free
+    # is over-reported -> over-allocation into swap; vLLM #35313, this repo's #65). But
+    # the override was implemented for CUDA only; RocmPlatform inherited the base False,
+    # so AMD APUs never took that path. HIP reports integrated=1 for gfx APUs (Strix
+    # Halo/Point, MI300A) and torch surfaces it as is_integrated (verified =1 on
+    # gfx1151), so mirror CudaPlatformBase. Replaces the former ROCM-21812 GTT/sysfs
+    # +8GiB heuristic (removed above): the 50% APU VRAM clamp it worked around is fixed
+    # in current ROCm (full GTT total is reported). No-ops once vLLM ships a ROCm
+    # override upstream.
+    p_rocm_isint = Path('vllm/platforms/rocm.py')
+    if p_rocm_isint.exists():
+        txt = p_rocm_isint.read_text()
+        if 'def is_integrated_gpu' not in txt and 'class RocmPlatform(Platform):' in txt:
+            method = (
+                '    @classmethod\n'
+                '    def is_integrated_gpu(cls, device_id: int = 0) -> bool:\n'
+                '        # AMD APUs (Strix Halo/Point, MI300A) are UMA: HIP reports\n'
+                '        # integrated=1, surfaced by torch as is_integrated. Mirrors\n'
+                '        # CudaPlatformBase so MemorySnapshot uses the psutil free-memory\n'
+                '        # path on unified memory (avoids over-allocation / swap).\n'
+                '        try:\n'
+                '            return bool(torch.cuda.get_device_properties(device_id).is_integrated)\n'
+                '        except Exception:\n'
+                '            return False\n\n'
+            )
+            head, sep, tail = txt.partition('class RocmPlatform(Platform):')
+            tail = tail.replace('    @classmethod\n', method + '    @classmethod\n', 1)
+            txt = head + sep + tail
+            p_rocm_isint.write_text(txt)
+            print(" -> Patched vllm/platforms/rocm.py (RocmPlatform.is_integrated_gpu UMA override)")
 
     print("Successfully patched vLLM/Environment for Strix Halo.")
 
