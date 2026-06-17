@@ -90,6 +90,21 @@ RUN if [ -n "$VLLM_COMMIT" ]; then \
 COPY scripts/patch_strix.py /opt/vllm/patch_strix.py
 RUN python /opt/vllm/patch_strix.py
 
+# --- FP8 (W8A8) Strix Halo Triton kernels (EXPERIMENTAL / RFC — see issue #67) ---
+# Custom FP8 kernels by @leonyurko for gfx1151 (which has no native FP8). The kernel
+# modules live on PYTHONPATH (/opt/fp8); patch_fp8_kernels.py routes vLLM's
+# compressed-tensors W8A8-FP8 scaled-mm path through the fused Triton dequant-GEMM
+# (fp8_triton.fp8_gemm). Kept separate from patch_strix.py so it stays independent
+# of the is_integrated memory work. Serve FP8 models with VLLM_ROCM_USE_AITER=0 and
+# --enforce-eager (see the kernel repo's serve scripts).
+# https://github.com/leonyurko/vllm-fp8-strix-halo-kernel-support
+ARG FP8_KERNELS_REF=50424f5525b8382353551e3301d0da56eca0be2b
+RUN git clone https://github.com/leonyurko/vllm-fp8-strix-halo-kernel-support.git /opt/fp8 && \
+  cd /opt/fp8 && git checkout "$FP8_KERNELS_REF"
+COPY scripts/patch_fp8_kernels.py /opt/vllm/patch_fp8_kernels.py
+RUN python /opt/vllm/patch_fp8_kernels.py
+ENV PYTHONPATH=/opt/fp8
+
 # 7. Build vLLM (Wheel Method) with CLANG Host Compiler
 ENV ROCM_HOME="/opt/rocm"
 ENV HIP_PATH="/opt/rocm"
