@@ -86,6 +86,22 @@ RUN export HIP_DEVICE_LIB_PATH=$(find /opt/rocm -type d -name bitcode -print -qu
     python -m pip install /tmp/dist/*.whl && rm -rf /tmp/dist
 RUN python -m pip install ray
 
+# The amdsmi python bindings ship with ROCm but are not installed by default.
+# vLLM's ROCm platform imports them for device name, GCN arch and VRAM total
+# (deliberately, so those queries don't create a HIP context). Without them the
+# import fails and the platform has to be stubbed out with a MagicMock -- which
+# silently leaks mock objects into real use and crashed vLLM >= 0.25.1 at startup.
+# They work fine on gfx1151 (verified: gfx1151 / Radeon 8060S / 40 CUs), so install
+# them for real and drop the stubbing (see scripts/patch_strix.py).
+#
+# patch_amdsmi.py then works around an amdsmi bug: on APUs it reports the small BIOS
+# VRAM carveout (512 MiB) as the VRAM total instead of the unified pool the GPU
+# actually addresses (110 GiB). Fixing it here, at the layer where the bug is, means
+# vLLM needs no memory patch. Drop once it lands upstream (ROCm/rocm-systems#8419).
+RUN python -m pip install /opt/rocm/share/amd_smi
+COPY scripts/patch_amdsmi.py /opt/vllm/patch_amdsmi.py
+RUN python /opt/vllm/patch_amdsmi.py
+
 # Prune /opt/rocm to a gfx1151 runtime set (this state is what the runtime stage copies):
 #  - static build-only archives (*.a)
 #  - all-architecture Tensile kernels except gfx1151 (hipBLASLt gfx942 alone is ~3 GB)
