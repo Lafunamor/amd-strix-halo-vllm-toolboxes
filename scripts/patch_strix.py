@@ -52,6 +52,19 @@ def patch_vllm():
             txt = txt.replace('def _get_gcn_arch() -> str:', 'def _get_gcn_arch() -> str:\n    return "gfx1151"\n\ndef _old_get_gcn_arch() -> str:')
             txt = re.sub(r'device_type = .*', 'device_type = "rocm"', txt)
             txt = re.sub(r'device_name = .*', 'device_name = "gfx1151"', txt)
+        # Patch 1.5b: force the torch.cuda fallback in get_device_total_memory().
+        # amdsmi is stubbed as a MagicMock above, so _query_total_memory_from_amdsmi()
+        # returns a MagicMock (a mock call never raises) — get_device_total_memory() then
+        # returns that MagicMock instead of hitting its torch.cuda fallback. vLLM >=0.25.1's
+        # new get_batch_defaults() calls it at engine-config time and does
+        # `device_memory >= 70*GiB`, which throws `TypeError: '>=' MagicMock vs int` and
+        # crashes startup for EVERY model. Make the amdsmi path raise so the existing
+        # `return torch.cuda.get_device_properties(...).total_memory` (a real int) is used.
+        if 'return _query_total_memory_from_amdsmi(physical_device_id)' in txt:
+            txt = txt.replace(
+                'return _query_total_memory_from_amdsmi(physical_device_id)',
+                'raise RuntimeError("amdsmi stubbed on Strix Halo; use torch.cuda fallback")')
+            print(" -> Patched get_device_total_memory (force torch.cuda fallback; fixes vLLM 0.25.1 MagicMock crash)")
         p_rocm_plat.write_text(txt)
         print(" -> Patched vllm/platforms/rocm.py (MagicMock amdsmi + forced gfx1151)")
 
