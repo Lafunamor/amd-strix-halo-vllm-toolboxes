@@ -24,49 +24,26 @@ def patch_vllm():
             p_spinloop.write_text(txt)
             print(" -> Patched csrc/spinloop.cpp (mwaitxintrin.h -> x86intrin.h for clang)")
 
-    # Patch 1: vllm/platforms/__init__.py (amdsmi monkey patch — PROVEN working for 5 months)
-    # Comment out real amdsmi imports and replace with pass stubs.
-    # The actual amdsmi library doesn't work on Strix Halo APUs in containers.
-    p_init = Path('vllm/platforms/__init__.py')
-    if p_init.exists():
-        txt = p_init.read_text()
-        txt = txt.replace('import amdsmi', '# import amdsmi')
-        txt = re.sub(r'is_rocm = .*', 'is_rocm = True', txt)
-        txt = re.sub(r'if len\(amdsmi\.amdsmi_get_processor_handles\(\)\) > 0:', 'if True:', txt)
-        txt = txt.replace('amdsmi.amdsmi_init()', 'pass')
-        txt = txt.replace('amdsmi.amdsmi_shut_down()', 'pass')
-        p_init.write_text(txt)
-        print(" -> Patched vllm/platforms/__init__.py (amdsmi disabled, is_rocm forced True)")
-
-    # Patch 1.5: vllm/platforms/rocm.py (MagicMock amdsmi + force gfx1151)
-    # Prepend MagicMock so any remaining amdsmi references in rocm.py silently succeed.
-    p_rocm_plat = Path('vllm/platforms/rocm.py')
-    if p_rocm_plat.exists():
-        txt = p_rocm_plat.read_text()
-        # Add MagicMock header if not already present
-        if 'sys.modules["amdsmi"] = MagicMock()' not in txt:
-            header = 'import sys\nfrom unittest.mock import MagicMock\nsys.modules["amdsmi"] = MagicMock()\n'
-            txt = header + txt
-        # Force arch detection
-        if 'def _get_gcn_arch() -> str:\n    return "gfx1151"' not in txt:
-            txt = txt.replace('def _get_gcn_arch() -> str:', 'def _get_gcn_arch() -> str:\n    return "gfx1151"\n\ndef _old_get_gcn_arch() -> str:')
-            txt = re.sub(r'device_type = .*', 'device_type = "rocm"', txt)
-            txt = re.sub(r'device_name = .*', 'device_name = "gfx1151"', txt)
-        # Patch 1.5b: force the torch.cuda fallback in get_device_total_memory().
-        # amdsmi is stubbed as a MagicMock above, so _query_total_memory_from_amdsmi()
-        # returns a MagicMock (a mock call never raises) — get_device_total_memory() then
-        # returns that MagicMock instead of hitting its torch.cuda fallback. vLLM >=0.25.1's
-        # new get_batch_defaults() calls it at engine-config time and does
-        # `device_memory >= 70*GiB`, which throws `TypeError: '>=' MagicMock vs int` and
-        # crashes startup for EVERY model. Make the amdsmi path raise so the existing
-        # `return torch.cuda.get_device_properties(...).total_memory` (a real int) is used.
-        if 'return _query_total_memory_from_amdsmi(physical_device_id)' in txt:
-            txt = txt.replace(
-                'return _query_total_memory_from_amdsmi(physical_device_id)',
-                'raise RuntimeError("amdsmi stubbed on Strix Halo; use torch.cuda fallback")')
-            print(" -> Patched get_device_total_memory (force torch.cuda fallback; fixes vLLM 0.25.1 MagicMock crash)")
-        p_rocm_plat.write_text(txt)
-        print(" -> Patched vllm/platforms/rocm.py (MagicMock amdsmi + forced gfx1151)")
+    # NOTE: the former Patch 1 / Patch 1.5 (comment out `import amdsmi`, stub it with a
+    # MagicMock, and force the GCN arch to gfx1151) are GONE.
+    #
+    # They existed because "the actual amdsmi library doesn't work on Strix Halo APUs in
+    # containers". That is no longer true: the amdsmi python bindings ship with ROCm
+    # (/opt/rocm/share/amd_smi) and work fine on gfx1151 -- they were simply never
+    # installed, so `from amdsmi import ...` failed and everything had to be stubbed.
+    # The Dockerfile now installs them, and vLLM resolves the arch and device name on its
+    # own (verified: _query_gcn_arch_from_amdsmi() -> 'gfx1151', device name ->
+    # AMD_Radeon_8060S).
+    #
+    # Keeping the MagicMock was also actively harmful: a mock call never raises, so vLLM's
+    # `try: <amdsmi> except: <fallback>` helpers never reached their fallback and the mock
+    # leaked into real use. vLLM >= 0.25.1 calls get_device_total_memory() from
+    # get_batch_defaults() at engine-config time and does `device_memory >= 70*GiB`, which
+    # raised `TypeError: '>=' MagicMock vs int` and crashed startup for EVERY model.
+    #
+    # The one genuine bug left is in amdsmi itself (it reports the 512 MiB BIOS VRAM
+    # carveout as the VRAM total on APUs); that is worked around in scripts/patch_amdsmi.py,
+    # at the layer where the bug actually is, so vLLM needs no memory patch at all.
 
     # Patch 2: _aiter_ops.py (Enable AITER on gfx1x, disable FP8 linear)
     p_aiter = Path('vllm/_aiter_ops.py')
