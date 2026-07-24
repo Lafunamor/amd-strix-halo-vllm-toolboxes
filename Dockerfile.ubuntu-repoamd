@@ -92,9 +92,13 @@ RUN python -m pip install ray
 
 # #40289 (required): this flash-attn build ships the Triton-AMD kernels at the aiter
 # location, so make flash_attn_triton_available() detect them there (else ViT -> SDPA OOM).
+# Target the INSTALLED venv copy via sysconfig purelib — NOT find_spec("vllm"), which at this
+# WORKDIR (/opt/vllm) resolves to the source tree that gets rm -rf'd, leaving the shipped
+# copy unpatched (cost us a broken CI image).
 RUN python - <<'PY'
-import importlib.util, os
-p = os.path.join(os.path.dirname(importlib.util.find_spec("vllm").origin), "platforms", "rocm.py")
+import os, sysconfig
+p = os.path.join(sysconfig.get_paths()["purelib"], "vllm", "platforms", "rocm.py")
+assert os.path.exists(p), f"installed vllm rocm.py not found at {p}"
 s = open(p).read()
 old = '''        if find_spec("flash_attn") is None:
             return False
