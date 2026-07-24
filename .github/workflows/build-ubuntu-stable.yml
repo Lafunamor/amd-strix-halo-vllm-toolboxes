@@ -178,8 +178,11 @@ jobs:
             VLLM_REF=${{ steps.ver.outputs.vllm_ref }}
           provenance: false
           sbom: false
-          cache-from: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache
-          cache-to: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
+          # Fresh cache ref (buildcache-repoamd): the old :buildcache was contaminated by the
+          # retired dev-ubuntu/nightly builds and reused a stale unpatched rocm.py layer,
+          # shipping broken vision. This ref only ever sees Dockerfile.ubuntu-repoamd layers.
+          cache-from: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache-repoamd
+          cache-to: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache-repoamd,mode=max,image-manifest=true,oci-mediatypes=true
 
       - name: Prune buildx cache
         if: always()

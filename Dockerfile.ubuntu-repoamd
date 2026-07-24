@@ -145,6 +145,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /opt/venv /opt/venv
 
+# Fail-fast: the ViT flash-attn detection MUST reference the aiter kernel location (#40289),
+# else vision silently falls back to Torch SDPA and OOMs. Guards against a stale buildcache
+# layer shipping an unpatched rocm.py (this cost us a broken CI image once).
+RUN grep -q "aiter.ops.triton._triton_kernels.flash_attn_triton_amd" \
+      /opt/venv/lib/python3.12/site-packages/vllm/platforms/rocm.py \
+    || { echo "ERROR: rocm.py ViT flash-attn detection is NOT patched for aiter (#40289)"; exit 1; }
+
 # Bake the pre-warmed Triton kernel cache (GDN + ViT flash-attn) so first-start skips the
 # ~20min autotune. Warmed on gfx1151 with the pinned torch/triton; if those drift the cache
 # just misses (graceful -> slow start until re-warmed). Build-time warmup isn't possible
