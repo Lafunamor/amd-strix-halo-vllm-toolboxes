@@ -1,0 +1,167 @@
+# syntax=docker/dockerfile:1
+# Ubuntu 24.04 + STABLE ROCm/torch for gfx1151 (Strix Halo), pip-first (TheRock era).
+# Multi-stage, slim (~9 GB), with WORKING VISION.
+#
+# Off the nightly treadmill: the whole gfx1151 ROCm/torch stack is STABLE per-arch wheels
+# from https://repo.amd.com/rocm/whl/gfx1151/ (torch 2.x+rocmX.Y.0 — release, not alpha).
+# torch brings its own matched ROCm (_rocm_sdk_core) → no system-vs-pip ABI mismatch
+# (that mix segfaulted the old dev-ubuntu:7.14 + nightly-torch attempt).
+#
+# Vision: gfx1151 vLLM would fall back to Torch SDPA for the ViT encoder (OOMs at 256 GiB),
+# so we build ROCm flash-attention + aiter Triton kernels and enable them
+# (FLASH_ATTENTION_TRITON_AMD_ENABLE + PR #40289 detection patch). aiter's C++ JIT module is
+# pre-warmed at build so the dev SDK can be dropped while vision still works at runtime.
+#
+# BASE = 24.04 / py3.12: 26.04 ships py3.14 but vLLM's amd-quark dep has no py3.14 wheel yet.
+
+# ============================ Stage 1: builder ============================
+FROM docker.io/ubuntu:24.04 AS builder
+ENV DEBIAN_FRONTEND=noninteractive FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3.12-venv python3.12-dev python3-pip \
+      git aria2 ffmpeg vim nano rsync curl ca-certificates xz-utils patch pkg-config \
+      protobuf-compiler libgoogle-perftools-dev libnuma-dev numactl libdrm-dev \
+      libibverbs-dev ibverbs-utils rdma-core rustc cargo build-essential \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN python3.12 -m venv /opt/venv
+ENV VIRTUAL_ENV=/opt/venv PATH=/opt/venv/bin:$PATH PIP_NO_CACHE_DIR=1 PYTHONNOUSERSITE=1
+RUN python -m pip install --upgrade pip wheel packaging "setuptools<80.0.0" "setuptools-rust>=1.9.0"
+
+# STABLE gfx1151 stack from repo.amd.com; rocm[devel] adds hipcc/headers/cmake to build.
+ARG ROCM_WHL=https://repo.amd.com/rocm/whl/gfx1151/
+ARG TORCH_VERSION=2.11.0
+ARG ROCM_VERSION=7.13.0
+RUN python -m pip install --index-url ${ROCM_WHL} --extra-index-url https://pypi.org/simple \
+      "torch==${TORCH_VERSION}" "rocm[devel]==${ROCM_VERSION}" torchaudio torchvision
+RUN python -m pip install --upgrade cmake ninja numpy "setuptools-scm>=8" \
+      "setuptools<80.0.0" scikit-build-core pybind11 numba scipy einops
+
+# amdsmi ships in the rocm-sdk but isn't importable — install + patch APU VRAM-carveout bug.
+RUN ROOT=$(rocm-sdk path --root) && python -m pip install "${ROOT}/share/amd_smi"
+COPY scripts/patch_amdsmi.py /opt/patch_amdsmi.py
+RUN python /opt/patch_amdsmi.py
+
+# --- VISION: ROCm flash-attention + aiter + composable_kernel (Triton ViT kernels) ---
+# Built against the pip rocm-sdk for gfx1151 so the ViT uses Flash Attention, not SDPA.
+COPY scripts/patch_aiter_headers.py /opt/patch_aiter_headers.py
+RUN set -e; ROOT=$(rocm-sdk path --root); \
+    export ROCM_PATH=$ROOT HIP_PATH=$ROOT \
+      PATH=$ROOT/bin:$ROOT/lib/llvm/bin:$PATH \
+      CC=$ROOT/lib/llvm/bin/amdclang CXX=$ROOT/lib/llvm/bin/amdclang++ \
+      HIP_DEVICE_LIB_PATH=$ROOT/lib/llvm/amdgcn/bitcode \
+      CMAKE_PREFIX_PATH=$ROOT/lib/cmake:$ROOT \
+      LD_LIBRARY_PATH=$ROOT/lib:$ROOT/lib/llvm/lib \
+      PYTORCH_ROCM_ARCH=gfx1151 GPU_ARCHS=gfx1151 AMDGPU_TARGETS=gfx1151; \
+    cd /opt && git clone https://github.com/ROCm/flash-attention.git && \
+    cd flash-attention && git checkout main_perf && \
+    git submodule update --init third_party/aiter && \
+    cd third_party/aiter && git submodule update --init 3rdparty/composable_kernel && \
+    export CK_DIR="$(pwd)/3rdparty/composable_kernel" && \
+    python -m pip wheel --no-build-isolation --no-deps -w /tmp/aiter_dist -v . && \
+    python -m pip install --force-reinstall /tmp/aiter_dist/amd_aiter*.whl && \
+    python /opt/patch_aiter_headers.py && \
+    cd /opt/flash-attention && \
+    python -c "import re; f=open('setup.py'); t=f.read(); f.close(); t=re.sub(r'subprocess\.run\([\s\S]*?third_party/aiter[\s\S]*?check=True,\s*\)', 'pass # patched', t); open('setup.py','w').write(t)" && \
+    pip install --no-build-isolation --no-deps . && \
+    cd /opt && rm -rf /opt/flash-attention /tmp/aiter_dist
+
+# Build vLLM from source against the pip rocm-sdk (matched to torch → no ABI mix).
+ARG VLLM_REF=eb28452b1
+ARG MAX_JOBS=4
+ENV MAX_JOBS=${MAX_JOBS} PYTORCH_ROCM_ARCH=gfx1151 VLLM_TARGET_DEVICE=rocm \
+    ROCBLAS_USE_HIPBLASLT=1 HIP_FORCE_DEV_KERNARG=1 VLLM_USE_TRITON_AWQ=1 MIOPEN_FIND_MODE=FAST
+WORKDIR /opt
+RUN git clone https://github.com/vllm-project/vllm.git /opt/vllm && \
+    cd /opt/vllm && if [ -n "$VLLM_REF" ]; then git checkout "$VLLM_REF"; fi
+WORKDIR /opt/vllm
+COPY scripts/patch_strix.py /opt/vllm/patch_strix.py
+RUN python /opt/vllm/patch_strix.py
+RUN ROOT=$(rocm-sdk path --root) && \
+    export ROCM_PATH=$ROOT HIP_PATH=$ROOT \
+      PATH=$ROOT/bin:$ROOT/lib/llvm/bin:$PATH \
+      CC=$ROOT/lib/llvm/bin/amdclang CXX=$ROOT/lib/llvm/bin/amdclang++ \
+      HIP_DEVICE_LIB_PATH=$ROOT/lib/llvm/amdgcn/bitcode \
+      CMAKE_PREFIX_PATH=$ROOT/lib/cmake:$ROOT \
+      LD_LIBRARY_PATH=$ROOT/lib:$ROOT/lib/llvm/lib && \
+    export CMAKE_ARGS="-DROCM_PATH=$ROOT -DHIP_PATH=$ROOT -DAMDGPU_TARGETS=gfx1151 -DHIP_ARCHITECTURES=gfx1151" && \
+    python -m pip wheel --no-build-isolation --no-deps -w /tmp/dist -v . && \
+    python -m pip install /tmp/dist/*.whl && rm -rf /tmp/dist
+RUN python -m pip install ray
+
+# #40289 (required): this flash-attn build ships the Triton-AMD kernels at the aiter
+# location, so make flash_attn_triton_available() detect them there (else ViT -> SDPA OOM).
+RUN python - <<'PY'
+import importlib.util, os
+p = os.path.join(os.path.dirname(importlib.util.find_spec("vllm").origin), "platforms", "rocm.py")
+s = open(p).read()
+old = '''        if find_spec("flash_attn") is None:
+            return False
+        if find_spec("flash_attn.flash_attn_triton_amd") is None:
+            return False'''
+new = '''        def _has(n):
+            try:
+                return find_spec(n) is not None
+            except (ImportError, ValueError):
+                return False
+        if not (_has("flash_attn.flash_attn_triton_amd")
+                or _has("aiter.ops.triton._triton_kernels.flash_attn_triton_amd")):
+            return False'''
+if old in s:
+    open(p,"w").write(s.replace(old,new,1)); print("patched rocm.py ViT detection (#40289)")
+elif "aiter.ops.triton._triton_kernels.flash_attn_triton_amd" in s:
+    print("rocm.py already detects the aiter location; no patch needed")
+else:
+    raise SystemExit("ERROR: rocm.py flash_attn_triton_available anchor not found")
+PY
+
+# --- SLIM: pre-warm aiter's C++ JIT (module_aiter_enum) while hipcc is present, then drop
+#     the 12 GB dev SDK. Vision still works at runtime (JIT cached; git in runtime image).
+#     amdsmi resolves libamd_smi.so via _rocm_sdk_core (unversioned symlink + runtime ROCM_PATH).
+RUN ROOT=$(rocm-sdk path --root) && \
+    export ROCM_PATH=$ROOT HIP_PATH=$ROOT \
+      PATH=$ROOT/bin:$ROOT/lib/llvm/bin:$PATH \
+      HIP_DEVICE_LIB_PATH=$ROOT/lib/llvm/amdgcn/bitcode \
+      LD_LIBRARY_PATH=$ROOT/lib:$ROOT/lib/llvm/lib && \
+    python -c "import aiter; print('aiter JIT prewarmed OK')"
+RUN CORE=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_core && \
+    python -m pip uninstall -y rocm-sdk-devel && \
+    ln -sf libamd_smi.so.26 "$CORE/lib/libamd_smi.so" && \
+    rm -rf /opt/vllm /root/.cache/pip && \
+    find /opt/venv -name '*.a' -delete 2>/dev/null || true
+
+# ============================ Stage 2: runtime (slim) ============================
+FROM docker.io/ubuntu:24.04 AS runtime
+ENV DEBIAN_FRONTEND=noninteractive
+
+# gcc + python3.12-dev: Triton JIT-compiles a host driver module on first kernel use.
+# git: aiter/flash_attn call git for version detection at import.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3.12 python3.12-dev gcc git ca-certificates curl zstd \
+      libatomic1 libnuma1 libgomp1 libelf1 libdrm2 libdrm-amdgpu1 libtinfo6 zlib1g libssl3 \
+      libgoogle-perftools4 libibverbs1 librdmacm1 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/venv /opt/venv
+
+# Bake the pre-warmed Triton kernel cache (GDN + ViT flash-attn) so first-start skips the
+# ~20min autotune. Warmed on gfx1151 with the pinned torch/triton; if those drift the cache
+# just misses (graceful -> slow start until re-warmed). Build-time warmup isn't possible
+# (autotune needs the live GPU), so the cache is shipped pre-warmed.
+COPY triton-cache-gfx1151.tar.zst /tmp/tc.tar.zst
+RUN mkdir -p /opt/triton_cache && \
+    tar --zstd -C /opt/triton_cache --strip-components=1 -xf /tmp/tc.tar.zst && \
+    rm /tmp/tc.tar.zst
+
+# ROCM_PATH/LD_LIBRARY_PATH → pip rocm-sdk (core + gfx1151 libraries); amdsmi resolves
+# libamd_smi.so via $ROCM_PATH/lib (builder added the unversioned symlink in core).
+# FLASH_ATTENTION_TRITON_AMD_ENABLE enables the ViT flash-attn path. Paths deterministic.
+ENV VIRTUAL_ENV=/opt/venv PATH=/opt/venv/bin:$PATH PYTHONNOUSERSITE=1 \
+    ROCM_PATH=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_core \
+    LD_LIBRARY_PATH=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_core/lib:/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries_gfx1151/lib \
+    PYTORCH_ROCM_ARCH=gfx1151 ROCBLAS_USE_HIPBLASLT=1 FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE \
+    HIP_FORCE_DEV_KERNARG=1 VLLM_USE_TRITON_AWQ=1 MIOPEN_FIND_MODE=FAST \
+    TRITON_CACHE_DIR=/opt/triton_cache
+WORKDIR /opt
+CMD ["/bin/bash"]

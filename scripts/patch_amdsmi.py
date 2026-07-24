@@ -31,18 +31,8 @@ import importlib.util
 import os
 import sys
 
-ANCHOR = """    _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_memory_total(
-            processor_handle, mem_type, ctypes.byref(total))
-    )
-
-    return total.value"""
-
-REPLACEMENT = """    _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_memory_total(
-            processor_handle, mem_type, ctypes.byref(total))
-    )
-
+# The workaround inserted just before `return total.value`. Shape-independent.
+_WORKAROUND = """
     # --- Strix Halo / APU workaround (see scripts/patch_amdsmi.py) --------------
     # On APUs the VRAM total is only the small BIOS carveout, while the GPU
     # addresses the unified pool that the GTT total (and KFD mem_banks) reports.
@@ -65,6 +55,25 @@ REPLACEMENT = """    _check_res(
 
     return total.value"""
 
+# amdsmi_get_gpu_memory_total ends with a `_check_res(...)` on the C call then
+# `return total.value`. The `_check_res(...)` block is formatted differently across
+# ROCm releases (multi-line pre-7.14, single-line in 7.14+), so support both.
+_CHECK_RES_MULTILINE = """    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_memory_total(
+            processor_handle, mem_type, ctypes.byref(total))
+    )
+"""
+_CHECK_RES_SINGLELINE = """    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_memory_total(processor_handle, mem_type, ctypes.byref(total))
+    )
+"""
+
+# (anchor, replacement) pairs, tried in order.
+PATCHES = [
+    (block + "\n    return total.value", block + _WORKAROUND)
+    for block in (_CHECK_RES_MULTILINE, _CHECK_RES_SINGLELINE)
+]
+
 MARKER = "Strix Halo / APU workaround"
 
 
@@ -81,18 +90,22 @@ def main() -> int:
         print(" -> amdsmi already patched (idempotent no-op)")
         return 0
 
-    if ANCHOR not in txt:
-        # amdsmi changed shape, or the upstream fix has landed and this is obsolete.
-        print(
-            " -> amdsmi_get_gpu_memory_total does not match the expected shape; "
-            "skipping (upstream fix may have landed -- verify and drop this script)",
-            file=sys.stderr,
-        )
-        return 1
+    for anchor, replacement in PATCHES:
+        if anchor in txt:
+            open(path, "w").write(txt.replace(anchor, replacement, 1))
+            print(" -> Patched amdsmi_get_gpu_memory_total (APU: prefer GTT over VRAM carveout)")
+            return 0
 
-    open(path, "w").write(txt.replace(ANCHOR, REPLACEMENT, 1))
-    print(" -> Patched amdsmi_get_gpu_memory_total (APU: prefer GTT over VRAM carveout)")
-    return 0
+    # No known shape matched: amdsmi changed again, or the upstream fix has landed.
+    # Fail loudly rather than silently ship an image that OOMs on APUs at runtime.
+    print(
+        " -> amdsmi_get_gpu_memory_total does not match any known shape; "
+        "the VRAM-carveout workaround was NOT applied. If ROCm/rocm-systems#8419 has "
+        "landed (VRAM total now reports the full pool) this script is obsolete -- verify "
+        "and drop it; otherwise the anchor needs updating for the new amdsmi shape.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 if __name__ == "__main__":
