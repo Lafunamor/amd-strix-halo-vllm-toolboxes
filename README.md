@@ -44,22 +44,20 @@ This is a hobby project maintained in my spare time. If you find these toolboxes
 
 ## Image Variants
 
-Three image families are published for gfx1151, each aimed at a different need:
+Two image families are published for gfx1151, each aimed at a different need:
 
 | Image | Base / ROCm | vLLM | Cadence | Tags | Use it for |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `kyuz0/vllm-therock-gfx1151` | Fedora 43 + **TheRock** ROCm nightlies | upstream `main` | manual | `:stable`, `:latest` | The original toolbox, with the custom RDMA/RoCE cluster build. Recommended default for most users. |
-| `vllm-rocm-gfx1151` | Ubuntu 24.04 + official **stable** ROCm | latest stable release tag | **daily** (auto; rebuilds only when the version combo changes) | `:latest`, `:rocm<X>-torch<Y>-vllm<Z>`, `:<date>` | A reproducible build off the nightly treadmill. The version-stamped tag pins an exact, immutable ROCm/torch/vLLM combo. |
-| `vllm-rocm-gfx1151-nightly` | Ubuntu 24.04 + official stable ROCm | **bleeding-edge** vLLM `main` | manual only | `:latest`, `:<date-time>` | Trying brand-new model archs/features that need vLLM `main` before they reach a stable tag (e.g. block-diffusion DiffusionGemma). |
+| `vllm-rocm-gfx1151` | Ubuntu 24.04 + official **stable** ROCm (repo.amd.com per-arch gfx1151 wheels) | latest stable release tag | **daily** (auto; rebuilds only when the version combo changes) | `:latest`, `:rocm<X>-torch<Y>-vllm<Z>`, `:<date>` | A reproducible build off the nightly treadmill, **with working vision**. The version-stamped tag pins an exact, immutable ROCm/torch/vLLM combo. |
 
-> The two `vllm-rocm-*` (Ubuntu / stable-ROCm) images are currently published under the [`lafunamor`](https://hub.docker.com/u/lafunamor) namespace as a test-drive (see [PR #63](https://github.com/kyuz0/amd-strix-halo-vllm-toolboxes/pull/63)). Their build workflows derive the Docker Hub repo from the GitHub owner, so they would publish under `kyuz0/` automatically if merged upstream.
+> The `vllm-rocm-gfx1151` (Ubuntu / stable-ROCm) image is currently published under the [`lafunamor`](https://hub.docker.com/u/lafunamor) namespace as a test-drive (see [PR #76](https://github.com/kyuz0/amd-strix-halo-vllm-toolboxes/pull/76)). Its build workflow derives the Docker Hub repo from the GitHub owner, so it would publish under `kyuz0/` automatically if merged upstream.
 
 Pin an exact, reproducible stack with the version-stamped tag, e.g.:
 
 ```bash
-docker pull docker.io/lafunamor/vllm-rocm-gfx1151:rocm7.2.4-torch2.12.0-vllm0.23.0   # immutable combo
-docker pull docker.io/lafunamor/vllm-rocm-gfx1151:latest                            # most recent stable daily
-docker pull docker.io/lafunamor/vllm-rocm-gfx1151-nightly:latest                    # latest manual bleeding-edge build
+docker pull docker.io/lafunamor/vllm-rocm-gfx1151:rocm7.13.0-torch2.11.0-vllm0.25.1   # immutable combo
+docker pull docker.io/lafunamor/vllm-rocm-gfx1151:latest                             # most recent stable daily
 ```
 
 ---
