@@ -10,9 +10,10 @@ name: build-ubuntu-stable
 # Flash Attention, not the SDPA path that OOMs). First serve autotunes the Triton GDN+ViT
 # kernels on the GPU (a few min); mount a host dir at TRITON_CACHE_DIR to persist that cache.
 #
-# The torch stack is PINNED (torch+rocm here; torchvision/torchaudio/device derived in the
-# Dockerfile) — bump deliberately after a GPU verify. Only vLLM (latest stable tag) is
-# auto-resolved. DAILY cron rebuilds only when the combo changed (immutable tag -> no-op).
+# Fully AUTO-DISCOVERED — no manual pins: the resolve step finds the newest torch on the index
+# that has a COMPLETE aligned gfx1151 set (torch + device + torchvision + torchaudio, same rocm),
+# and torchvision/torchaudio/device are derived from that torch in the Dockerfile. vLLM = latest
+# stable tag. DAILY cron rebuilds only when the resolved combo changed (immutable tag -> no-op).
 
 on:
   schedule:
@@ -53,18 +54,30 @@ jobs:
         id: ver
         run: |
           set -euo pipefail
-          # Torch stack PINNED to a verified, mutually-compatible combo on the multi-arch index.
-          # torch<->torchvision<->torchaudio<->gfx1151 device pkg are coupled, and torch must
-          # match the vLLM we build — so we bump this deliberately after a GPU verify rather than
-          # auto-resolving newest (which risks an unverified/incompatible combo). Confirm the
-          # pinned combo still exists on the index (fail loudly if AMD moves/removes it).
-          # torchvision/torchaudio are DERIVED from TORCH_VER inside the Dockerfile (torchaudio
-          # == torch; torchvision == 0.(minor+15)); only torch+rocm are pinned here.
-          TORCH_VER=2.11.0
-          ROCM_VER=7.14.0
-          curl -fsSL "${ROCM_WHL}amd-torch-device-gfx1151/" \
-            | grep -q "amd_torch_device_gfx1151-${TORCH_VER}+rocm${ROCM_VER}-cp312-cp312-linux" \
-            || { echo "pinned torch device pkg ${TORCH_VER}+rocm${ROCM_VER} not found on ${ROCM_WHL}" >&2; exit 1; }
+          # AUTO-DISCOVER the newest gfx1151 torch stack on the multi-arch index — no manual pins.
+          # The 4 torch packages are coupled and publish at slightly different times (e.g. torch
+          # 2.12 can exist before torchaudio 2.12), so we iterate torch versions newest-first and
+          # pick the first with a COMPLETE aligned set present for the same rocm:
+          #   torch + amd-torch-device-gfx1151 + torchvision(0.[minor+15]) + torchaudio.
+          # torchvision/torchaudio/device are then derived from TORCH_VER in the Dockerfile.
+          DEV_LIST=$(curl -fsSL "${ROCM_WHL}amd-torch-device-gfx1151/")
+          TORCH_LIST=$(curl -fsSL "${ROCM_WHL}torch/")
+          TV_LIST=$(curl -fsSL "${ROCM_WHL}torchvision/")
+          TA_LIST=$(curl -fsSL "${ROCM_WHL}torchaudio/")
+          CANDS=$(printf '%s' "$DEV_LIST" \
+            | grep -oE 'amd_torch_device_gfx1151-[0-9][0-9.]*\+rocm[0-9.]+-cp312-cp312-linux' \
+            | sed -E 's/^amd_torch_device_gfx1151-//; s/-cp312-cp312-linux$//' | sort -Vr | uniq)
+          TORCH_VER=""; ROCM_VER=""
+          for c in $CANDS; do
+            t="${c%%+*}"; r="${c##*+rocm}"
+            tvm=$(( $(echo "$t" | cut -d. -f2) + 15 )); tv="0.${tvm}.0"
+            printf '%s' "$TORCH_LIST" | grep -q "torch-${t}+rocm${r}-cp312-cp312-linux"            || continue
+            printf '%s' "$TV_LIST"    | grep -q "torchvision-${tv}+rocm${r}-cp312-cp312-linux"     || continue
+            printf '%s' "$TA_LIST"    | grep -q "torchaudio-${t}+rocm${r}-cp312-cp312-linux"       || continue
+            TORCH_VER="$t"; ROCM_VER="$r"; break
+          done
+          [ -n "$TORCH_VER" ] || { echo "no complete gfx1151 torch stack found on ${ROCM_WHL}" >&2; exit 1; }
+          echo "Auto-discovered aligned stack: torch ${TORCH_VER}+rocm${ROCM_VER} (torchvision 0.$(( $(echo "$TORCH_VER"|cut -d. -f2)+15 )).0, torchaudio ${TORCH_VER})"
           # vLLM: manual override, else latest stable release tag (skip rc/dev/a/b).
           VLLM_REF="${{ github.event.inputs.vllm_ref }}"
           if [ -z "$VLLM_REF" ]; then
