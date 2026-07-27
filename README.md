@@ -60,6 +60,21 @@ docker pull docker.io/lafunamor/vllm-rocm-gfx1151:rocm7.13.0-torch2.11.0-vllm0.2
 docker pull docker.io/lafunamor/vllm-rocm-gfx1151:latest                             # most recent stable daily
 ```
 
+> [!NOTE]
+> **First start is slow (several minutes) — this is expected, not a hang.** vLLM does a lot of
+> dynamic, one-time work at startup on gfx1151: Triton kernels are JIT-compiled and autotuned on
+> the live GPU, and CUDA (HIP) graphs are captured. On a cold cache a first launch of a ~27–35B
+> model takes **~4–5 minutes** before the server reports ready; give it a long timeout.
+>
+> To make subsequent starts fast, **mount a persistent Triton cache** so the compiled kernels are
+> reused across restarts (the compiled set for one model is ~200 MB):
+> ```bash
+> -v "$HOME/.cache/triton-gfx1151:/opt/triton_cache"   # TRITON_CACHE_DIR in the image
+> ```
+> The cache is keyed to the torch/triton/vLLM versions, so a version bump re-warms once. Also avoid
+> launching a cold start while the GPU is already under heavy load from another process — let the
+> one-time capture/compile finish on an otherwise-idle GPU.
+
 ---
 
 ## Tested Models (Benchmarks)
