@@ -4,15 +4,15 @@ name: build-ubuntu-stable
 # Publishes docker.io/<owner>/vllm-rocm-gfx1151. Replaces the two former Ubuntu images
 # (old dev-ubuntu base + the nightly variant) — see Dockerfile.ubuntu-repoamd.
 #
-# Off the nightly treadmill: the whole gfx1151 ROCm/torch stack is STABLE per-arch wheels
-# from https://repo.amd.com/rocm/whl/gfx1151/ (torch X.Y.Z+rocmA.B.C, release — not alpha).
-# torch brings its own matched ROCm -> no system-vs-pip ABI mismatch. Vision works via a
-# ROCm flash-attention + aiter build (ViT Flash Attention, not the SDPA path that OOMs).
-# First serve of a model autotunes the Triton GDN+ViT kernels on the GPU (a few min); mount a
-# persistent host dir at TRITON_CACHE_DIR (/opt/triton_cache) to keep that cache across runs.
+# Off the nightly treadmill: STABLE release wheels from https://repo.amd.com/rocm/whl-multi-arch/
+# (TheRock multi-arch device-package layout, ROCm 7.14). torch brings its own matched ROCm ->
+# no system-vs-pip ABI mismatch. Vision works via a ROCm flash-attention + aiter build (ViT
+# Flash Attention, not the SDPA path that OOMs). First serve autotunes the Triton GDN+ViT
+# kernels on the GPU (a few min); mount a host dir at TRITON_CACHE_DIR to persist that cache.
 #
-# DAILY cron auto-resolves the newest stable gfx1151 torch + latest vLLM stable tag and
-# rebuilds only when the resolved combo changed (immutable tag -> registry hit = no-op).
+# The torch stack is PINNED (torch+rocm here; torchvision/torchaudio/device derived in the
+# Dockerfile) — bump deliberately after a GPU verify. Only vLLM (latest stable tag) is
+# auto-resolved. DAILY cron rebuilds only when the combo changed (immutable tag -> no-op).
 
 on:
   schedule:
@@ -58,10 +58,10 @@ jobs:
           # match the vLLM we build — so we bump this deliberately after a GPU verify rather than
           # auto-resolving newest (which risks an unverified/incompatible combo). Confirm the
           # pinned combo still exists on the index (fail loudly if AMD moves/removes it).
+          # torchvision/torchaudio are DERIVED from TORCH_VER inside the Dockerfile (torchaudio
+          # == torch; torchvision == 0.(minor+15)); only torch+rocm are pinned here.
           TORCH_VER=2.11.0
           ROCM_VER=7.14.0
-          TORCHVISION_VER=0.26.0
-          TORCHAUDIO_VER=2.11.0
           curl -fsSL "${ROCM_WHL}amd-torch-device-gfx1151/" \
             | grep -q "amd_torch_device_gfx1151-${TORCH_VER}+rocm${ROCM_VER}-cp312-cp312-linux" \
             || { echo "pinned torch device pkg ${TORCH_VER}+rocm${ROCM_VER} not found on ${ROCM_WHL}" >&2; exit 1; }
@@ -81,8 +81,6 @@ jobs:
           VERSION_TAG="rocm${ROCM_VER}-torch${TORCH_VER}-vllm${VLLM_SLUG}"
           echo "torch_ver=${TORCH_VER}"     >> "$GITHUB_OUTPUT"
           echo "rocm_ver=${ROCM_VER}"       >> "$GITHUB_OUTPUT"
-          echo "torchvision_ver=${TORCHVISION_VER}" >> "$GITHUB_OUTPUT"
-          echo "torchaudio_ver=${TORCHAUDIO_VER}"   >> "$GITHUB_OUTPUT"
           echo "vllm_ref=${VLLM_REF}"       >> "$GITHUB_OUTPUT"
           echo "version_tag=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
           echo "Resolved: ${VERSION_TAG} (torch ${TORCH_VER}+rocm${ROCM_VER}, vLLM ${VLLM_REF})"
@@ -181,8 +179,6 @@ jobs:
             ROCM_WHL=${{ env.ROCM_WHL }}
             TORCH_VERSION=${{ steps.ver.outputs.torch_ver }}
             ROCM_VERSION=${{ steps.ver.outputs.rocm_ver }}
-            TORCHVISION_VERSION=${{ steps.ver.outputs.torchvision_ver }}
-            TORCHAUDIO_VERSION=${{ steps.ver.outputs.torchaudio_ver }}
             VLLM_REF=${{ steps.ver.outputs.vllm_ref }}
           provenance: false
           sbom: false

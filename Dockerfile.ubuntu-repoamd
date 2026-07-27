@@ -35,17 +35,24 @@ RUN python -m pip install --upgrade pip wheel packaging "setuptools<80.0.0" "set
 # ROCm 7.14 lives here; the legacy per-arch whl/gfx1151/ index is frozen at 7.13.0.
 # Torch stack is PINNED to a verified, mutually-compatible combo (the 4 packages are coupled,
 # and torch must match the vLLM we build) — bump deliberately. rocm-sdk-devel = build SDK.
+# SINGLE SOURCE OF TRUTH = TORCH_VERSION (+ ROCM_VERSION); everything else is ALIGNED to it:
+#   - amd-torch-device-gfx1151 and torchaudio share torch's version exactly
+#   - torchvision tracks torch as 0.(minor+15)  (torch 2.N -> torchvision 0.(N+15); 2.11 -> 0.26)
+# (pip left to itself picks the NEWEST torchvision, which is built for a newer torch — so we
+# derive it rather than let it float.) A torch bump needs only these two ARGs.
 ARG ROCM_WHL=https://repo.amd.com/rocm/whl-multi-arch/
 ARG TORCH_VERSION=2.11.0
 ARG ROCM_VERSION=7.14.0
-ARG TORCHVISION_VERSION=0.26.0
-ARG TORCHAUDIO_VERSION=2.11.0
-RUN python -m pip install --index-url ${ROCM_WHL} --extra-index-url https://pypi.org/simple \
+RUN set -e; \
+    TV_MINOR=$(( $(echo "${TORCH_VERSION}" | cut -d. -f2) + 15 )); \
+    TORCHVISION="0.${TV_MINOR}.0+rocm${ROCM_VERSION}"; \
+    echo "aligned to torch ${TORCH_VERSION}+rocm${ROCM_VERSION} -> torchvision=${TORCHVISION}, torchaudio=${TORCH_VERSION}+rocm${ROCM_VERSION}"; \
+    python -m pip install --index-url ${ROCM_WHL} --extra-index-url https://pypi.org/simple \
       "torch==${TORCH_VERSION}+rocm${ROCM_VERSION}" \
       "amd-torch-device-gfx1151==${TORCH_VERSION}+rocm${ROCM_VERSION}" \
       "rocm-sdk-devel==${ROCM_VERSION}" "rocm-sdk-device-gfx1151==${ROCM_VERSION}" \
-      "torchvision==${TORCHVISION_VERSION}+rocm${ROCM_VERSION}" \
-      "torchaudio==${TORCHAUDIO_VERSION}+rocm${ROCM_VERSION}"
+      "torchvision==${TORCHVISION}" \
+      "torchaudio==${TORCH_VERSION}+rocm${ROCM_VERSION}"
 RUN python -m pip install --upgrade cmake ninja numpy "setuptools-scm>=8" \
       "setuptools<80.0.0" scikit-build-core pybind11 numba scipy einops
 
