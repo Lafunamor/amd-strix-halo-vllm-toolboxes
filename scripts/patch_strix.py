@@ -24,36 +24,26 @@ def patch_vllm():
             p_spinloop.write_text(txt)
             print(" -> Patched csrc/spinloop.cpp (mwaitxintrin.h -> x86intrin.h for clang)")
 
-    # Patch 1: vllm/platforms/__init__.py (amdsmi monkey patch — PROVEN working for 5 months)
-    # Comment out real amdsmi imports and replace with pass stubs.
-    # The actual amdsmi library doesn't work on Strix Halo APUs in containers.
-    p_init = Path('vllm/platforms/__init__.py')
-    if p_init.exists():
-        txt = p_init.read_text()
-        txt = txt.replace('import amdsmi', '# import amdsmi')
-        txt = re.sub(r'is_rocm = .*', 'is_rocm = True', txt)
-        txt = re.sub(r'if len\(amdsmi\.amdsmi_get_processor_handles\(\)\) > 0:', 'if True:', txt)
-        txt = txt.replace('amdsmi.amdsmi_init()', 'pass')
-        txt = txt.replace('amdsmi.amdsmi_shut_down()', 'pass')
-        p_init.write_text(txt)
-        print(" -> Patched vllm/platforms/__init__.py (amdsmi disabled, is_rocm forced True)")
-
-    # Patch 1.5: vllm/platforms/rocm.py (MagicMock amdsmi + force gfx1151)
-    # Prepend MagicMock so any remaining amdsmi references in rocm.py silently succeed.
-    p_rocm_plat = Path('vllm/platforms/rocm.py')
-    if p_rocm_plat.exists():
-        txt = p_rocm_plat.read_text()
-        # Add MagicMock header if not already present
-        if 'sys.modules["amdsmi"] = MagicMock()' not in txt:
-            header = 'import sys\nfrom unittest.mock import MagicMock\nsys.modules["amdsmi"] = MagicMock()\n'
-            txt = header + txt
-        # Force arch detection
-        if 'def _get_gcn_arch() -> str:\n    return "gfx1151"' not in txt:
-            txt = txt.replace('def _get_gcn_arch() -> str:', 'def _get_gcn_arch() -> str:\n    return "gfx1151"\n\ndef _old_get_gcn_arch() -> str:')
-            txt = re.sub(r'device_type = .*', 'device_type = "rocm"', txt)
-            txt = re.sub(r'device_name = .*', 'device_name = "gfx1151"', txt)
-        p_rocm_plat.write_text(txt)
-        print(" -> Patched vllm/platforms/rocm.py (MagicMock amdsmi + forced gfx1151)")
+    # NOTE: the former Patch 1 / Patch 1.5 (comment out `import amdsmi`, stub it with a
+    # MagicMock, and force the GCN arch to gfx1151) are GONE.
+    #
+    # They existed because "the actual amdsmi library doesn't work on Strix Halo APUs in
+    # containers". That is no longer true: the amdsmi python bindings ship with ROCm
+    # (/opt/rocm/share/amd_smi) and work fine on gfx1151 -- they were simply never
+    # installed, so `from amdsmi import ...` failed and everything had to be stubbed.
+    # The Dockerfile now installs them, and vLLM resolves the arch and device name on its
+    # own (verified: _query_gcn_arch_from_amdsmi() -> 'gfx1151', device name ->
+    # AMD_Radeon_8060S).
+    #
+    # Keeping the MagicMock was also actively harmful: a mock call never raises, so vLLM's
+    # `try: <amdsmi> except: <fallback>` helpers never reached their fallback and the mock
+    # leaked into real use. vLLM >= 0.25.1 calls get_device_total_memory() from
+    # get_batch_defaults() at engine-config time and does `device_memory >= 70*GiB`, which
+    # raised `TypeError: '>=' MagicMock vs int` and crashed startup for EVERY model.
+    #
+    # The one genuine bug left is in amdsmi itself (it reports the 512 MiB BIOS VRAM
+    # carveout as the VRAM total on APUs); that is worked around in scripts/patch_amdsmi.py,
+    # at the layer where the bug actually is, so vLLM needs no memory patch at all.
 
     # Patch 2: _aiter_ops.py (Enable AITER on gfx1x, disable FP8 linear)
     p_aiter = Path('vllm/_aiter_ops.py')
@@ -65,27 +55,26 @@ def patch_vllm():
             txt = txt.replace("from vllm.platforms import current_platform", 
                               "from vllm.platforms import current_platform\nfrom vllm.platforms.rocm import on_gfx1x")
 
-        # Extend is_aiter_found_and_supported
+        # Extend is_aiter_found_and_supported. Scope the call-site replace to that
+        # function's `return on_mi3xx()` — a bare "on_mi3xx()" replace also flipped
+        # is_linear_hipbmm_enabled on gfx1x (unintended; found in the v0.26.0 audit).
         if "or on_gfx1x()" not in txt:
             txt = txt.replace("import on_mi3xx", "import on_mi3xx, on_gfx1x")
-            txt = txt.replace("on_mi3xx()", "(on_mi3xx() or on_gfx1x())")
-            
+            txt = txt.replace("return on_mi3xx()", "return (on_mi3xx() or on_gfx1x())")
+
         # Disable FP8 linear
         if "is_linear_fp8_enabled" in txt:
             txt = re.sub(
-                r'(def is_linear_fp8_enabled.*?:\n\s+return) (.*?)\n', 
-                r'\1 False\n', 
+                r'(def is_linear_fp8_enabled.*?:\n\s+return) (.*?)\n',
+                r'\1 False\n',
                 txt, count=1, flags=re.DOTALL
             )
-            
-        # Disable AITER RMSNorm on gfx1x (CUDA Graph hang)
-        if "is_rmsnorm_enabled" in txt:
-            txt = re.sub(
-                r'(def is_rmsnorm_enabled.*?:\n\s+return) (cls\._AITER_ENABLED and cls\._RMSNORM_ENABLED)\n', 
-                r'\1 \2 and not getattr(on_gfx1x, "__call__", lambda: False)()\n', 
-                txt, count=1, flags=re.DOTALL
-            )
-            
+
+        # NOTE: the former "disable AITER RMSNorm" patch (is_rmsnorm_enabled) was REMOVED.
+        # vLLM >=0.26.0 deleted that method; AITER RMSNorm is now gated solely by the
+        # IrOpPriorityConfig bypass in Patch 5 (`rms_norm = ["aiter"]+default` -> `default`
+        # on gfx1x). Re-adding an _aiter_ops gate here would be a silent no-op. (v0.26.0 audit.)
+
         # Disable AITER Fused MoE on gfx1x (due to hundreds of CDNA-specific dpp_mov assembly conflicts)
         if "is_fused_moe_enabled" in txt:
             txt = re.sub(
@@ -127,32 +116,20 @@ def patch_vllm():
     p_rocm = Path('vllm/platforms/rocm.py')
     if p_rocm.exists():
         txt = p_rocm.read_text()
-        
-        # Legacy vLLM < 0.19 fallback
-        if "if is_aiter_found_and_supported():\n            custom_ops.append(\"+rms_norm\")" in txt:
-            txt = txt.replace(
-                "if is_aiter_found_and_supported():\n            custom_ops.append(\"+rms_norm\")",
-                "if is_aiter_found_and_supported() and not getattr(self, 'on_gfx1x', lambda: False)():\n            custom_ops.append(\"+rms_norm\")"
-            )
-        
-        # Modern vLLM 0.19+ struct (compilation_config.custom_ops)
-        elif "compilation_config.custom_ops.append(\"+rms_norm\")" in txt:
-            if "if not getattr(self, \"on_gfx1x\", lambda: False)():" not in txt:
-                txt = re.sub(
-                    r'(\s+)compilation_config\.custom_ops\.append\("\+rms_norm"\)',
-                    r'\1if not getattr(self, "on_gfx1x", lambda: False)():\n\1    compilation_config.custom_ops.append("+rms_norm")',
-                    txt
-                )
-                
-        # Modern vLLM 0.19.2rc1+ IrOpPriorityConfig bypass
+
+        # RMSNorm off AITER on gfx1x via the IrOpPriorityConfig list — the only live anchor
+        # in vLLM >=0.26.0. The former legacy `custom_ops.append("+rms_norm")` variants
+        # (vLLM <0.19, and the 0.19+ compilation_config form) were REMOVED: dead anchors in
+        # the versions we build, and the 0.19+ string now only appears in an unrelated SP/PP
+        # path in config/vllm.py that must NOT be touched. (v0.26.0 audit.)
         if 'rms_norm = ["aiter"] + default' in txt:
             txt = txt.replace(
                 'rms_norm = ["aiter"] + default',
                 'rms_norm = ["aiter"] + default if not on_gfx1x() else default'
             )
-            
+
         p_rocm.write_text(txt)
-        print(" -> Patched vllm/platforms/rocm.py (custom_ops & IrOpPriorityConfig rms_norm bypassed on gfx1x)")
+        print(" -> Patched vllm/platforms/rocm.py (IrOpPriorityConfig rms_norm bypassed on gfx1x)")
 
     # Patch 6: vllm/compilation/passes/fusion/rocm_aiter_fusion.py (duplicate pattern bypass)
     p_fusion = Path('vllm/compilation/passes/fusion/rocm_aiter_fusion.py')
@@ -167,18 +144,9 @@ def patch_vllm():
             p_fusion.write_text(txt)
             print(" -> Patched vllm/compilation/passes/fusion/rocm_aiter_fusion.py (skip_duplicates)")
 
-    # Patch 7: Triton backend AttrsDescriptor repr
-    for sp in site.getsitepackages():
-        triton_compiler = Path(sp) / "triton/backends/compiler.py"
-        if triton_compiler.exists():
-            txt = triton_compiler.read_text()
-            if "def __repr__(self):" not in txt:
-                txt = txt.replace(
-                    "def to_dict(self):", 
-                    "def __repr__(self):\n        return f'AttrsDescriptor.from_dict({self.to_dict()!r})'\n\n    def to_dict(self):"
-                )
-                triton_compiler.write_text(txt)
-                print(f" -> Patched {triton_compiler} (AttrsDescriptor repr)")
+    # NOTE: the former "Triton AttrsDescriptor repr" patch was REMOVED — the AttrsDescriptor
+    # class no longer exists in Triton >=3.6.0 (deleted upstream), so the patch was a
+    # permanent silent no-op on the triton we ship. (v0.26.0 / triton-3.6.0 audit.)
 
     # Patch 7: aiter JIT path fix — aiter builds .so files into ~/.aiter/jit/
     # but importlib.import_module("aiter.jit.<module>") only looks in the
@@ -219,7 +187,7 @@ if _os.path.isdir(_jit_cache) and _jit_cache not in __path__:
         soft_import = (
             f"{indent}try:\n"
             f"{indent}    {hard_import_bare}\n"
-            f"{indent}except (ImportError, KeyError, ModuleNotFoundError):\n"
+            f"{indent}except (ImportError, KeyError, ModuleNotFoundError, RuntimeError):\n"
             f"{indent}    flash_attn_gpu = None"
         )
         txt = txt.replace(original_line, soft_import)
@@ -237,35 +205,12 @@ if _os.path.isdir(_jit_cache) and _jit_cache not in __path__:
         if fa_iface.exists():
             _patch_flash_interface(fa_iface)
 
-    # Patch 9: Allow Triton MoE kernels on gfx11xx (Strix Halo)
-    # vLLM recently capped MXFP4 Triton MoE kernels to < (11, 0) which excludes RDNA3.5 (11.x)
-    for p_triton in [
-        Path('vllm/model_executor/layers/fused_moe/experts/gpt_oss_triton_kernels_moe.py'),
-        Path('vllm/model_executor/layers/fused_moe/oracle/mxfp4.py')
-    ]:
-        if p_triton.exists():
-            txt = p_triton.read_text()
-            if "cap.minor) < (11, 0)" in txt:
-                txt = txt.replace("cap.minor) < (11, 0)", "cap.minor) < (12, 0)")
-            if "capability() < (11, 0)" in txt:
-                txt = txt.replace("capability() < (11, 0)", "capability() < (12, 0)")
-            p_triton.write_text(txt)
-            print(f" -> Patched {p_triton} (Triton MoE on gfx11xx)")
-
-    # Patch 11: moe_wna16.py — fix tp_size AttributeError on RoutedExperts
-    # vLLM refactored FusedMoE and moved tp_size out of RoutedExperts (the
-    # weight container) into FusedMoEConfig. But moe_wna16_weight_loader still
-    # accesses `layer.tp_size` which crashes AWQ MoE models (Qwen3.5 etc.)
-    # that fall back from AWQMoeMarlin to the WNA16 path.
-    # Fix: use get_tp_group().world_size which is always available.
-    # https://github.com/vllm-project/vllm/issues/45403
-    p_moe_wna16 = Path('vllm/model_executor/layers/quantization/moe_wna16.py')
-    if p_moe_wna16.exists():
-        txt = p_moe_wna16.read_text()
-        if 'layer.tp_size' in txt:
-            txt = txt.replace('layer.tp_size', 'get_tp_group().world_size')
-            p_moe_wna16.write_text(txt)
-            print(" -> Patched moe_wna16.py (layer.tp_size -> get_tp_group().world_size)")
+    # NOTE: the former "Triton MoE on gfx11xx" cap-bump patch was REMOVED. vLLM >=0.26.0
+    # already enables the OAI Triton MoE kernels on gfx11xx via the ROCm on_gfx1x()/on_gfx9()
+    # gate (_triton_kernel_moe_supports_current_device); the old `< (11, 0)` cap is gone from
+    # oracle/mxfp4.py, and the only remaining `(11, 0)` match sits in a CUDA-only branch of
+    # gpt_oss_triton_kernels_moe.py where our replace mis-fired (inert on ROCm, but a wrong
+    # edit to the CUDA gate). Dropped entirely. (v0.26.0 audit.)
 
     # Patch 11: RocmPlatform.is_integrated_gpu override (smart UMA detection)
     # Upstream vLLM PR #35356 (merged 2026-04-13) added Platform.is_integrated_gpu()
