@@ -31,7 +31,7 @@ on:
 
 env:
   DOCKER_BUILDKIT: "1"
-  ROCM_WHL: https://repo.amd.com/rocm/whl/gfx1151/
+  ROCM_WHL: https://repo.amd.com/rocm/whl-multi-arch/
 
 jobs:
   build:
@@ -53,13 +53,18 @@ jobs:
         id: ver
         run: |
           set -euo pipefail
-          # Newest STABLE gfx1151 torch on repo.amd.com (release build, e.g. 2.11.0+rocm7.13.0).
-          LATEST=$(curl -fsSL "${ROCM_WHL}torch/" \
-            | grep -oE 'torch-[0-9][0-9.]*\+rocm[0-9.]+-cp312-cp312-linux' \
-            | sed -E 's/^torch-//; s/-cp312-cp312-linux$//' \
-            | sort -V | tail -n1)
-          TORCH_VER="${LATEST%%+*}"        # 2.11.0
-          ROCM_VER="${LATEST##*+rocm}"     # 7.13.0
+          # Torch stack PINNED to a verified, mutually-compatible combo on the multi-arch index.
+          # torch<->torchvision<->torchaudio<->gfx1151 device pkg are coupled, and torch must
+          # match the vLLM we build — so we bump this deliberately after a GPU verify rather than
+          # auto-resolving newest (which risks an unverified/incompatible combo). Confirm the
+          # pinned combo still exists on the index (fail loudly if AMD moves/removes it).
+          TORCH_VER=2.11.0
+          ROCM_VER=7.14.0
+          TORCHVISION_VER=0.26.0
+          TORCHAUDIO_VER=2.11.0
+          curl -fsSL "${ROCM_WHL}amd-torch-device-gfx1151/" \
+            | grep -q "amd_torch_device_gfx1151-${TORCH_VER}+rocm${ROCM_VER}-cp312-cp312-linux" \
+            || { echo "pinned torch device pkg ${TORCH_VER}+rocm${ROCM_VER} not found on ${ROCM_WHL}" >&2; exit 1; }
           # vLLM: manual override, else latest stable release tag (skip rc/dev/a/b).
           VLLM_REF="${{ github.event.inputs.vllm_ref }}"
           if [ -z "$VLLM_REF" ]; then
@@ -76,6 +81,8 @@ jobs:
           VERSION_TAG="rocm${ROCM_VER}-torch${TORCH_VER}-vllm${VLLM_SLUG}"
           echo "torch_ver=${TORCH_VER}"     >> "$GITHUB_OUTPUT"
           echo "rocm_ver=${ROCM_VER}"       >> "$GITHUB_OUTPUT"
+          echo "torchvision_ver=${TORCHVISION_VER}" >> "$GITHUB_OUTPUT"
+          echo "torchaudio_ver=${TORCHAUDIO_VER}"   >> "$GITHUB_OUTPUT"
           echo "vllm_ref=${VLLM_REF}"       >> "$GITHUB_OUTPUT"
           echo "version_tag=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
           echo "Resolved: ${VERSION_TAG} (torch ${TORCH_VER}+rocm${ROCM_VER}, vLLM ${VLLM_REF})"
@@ -174,6 +181,8 @@ jobs:
             ROCM_WHL=${{ env.ROCM_WHL }}
             TORCH_VERSION=${{ steps.ver.outputs.torch_ver }}
             ROCM_VERSION=${{ steps.ver.outputs.rocm_ver }}
+            TORCHVISION_VERSION=${{ steps.ver.outputs.torchvision_ver }}
+            TORCHAUDIO_VERSION=${{ steps.ver.outputs.torchaudio_ver }}
             VLLM_REF=${{ steps.ver.outputs.vllm_ref }}
           provenance: false
           sbom: false
