@@ -194,5 +194,10 @@ RUN chmod +x /opt/start-vllm /opt/start-vllm-cluster /opt/vllm_cluster_bench.py 
 RUN chmod 0644 /etc/profile.d/*.sh
 RUN printf 'ulimit -S -c 0\n' > /etc/profile.d/90-nocoredump.sh && chmod 0644 /etc/profile.d/90-nocoredump.sh
 
+# rdma group: podman resolves `--group-add rdma` against the CONTAINER's /etc/group and ABORTS
+# the start if the name is missing. Fedora ships video(39) + render(105) but no rdma, so
+# refresh_toolbox.sh's InfiniBand branch (`--group-add rdma`, added whenever /dev/infiniband
+# exists) could not start this image on any RDMA host. -f keeps it idempotent.
+RUN groupadd -f -g 101 rdma
 
 CMD ["/bin/bash"]
