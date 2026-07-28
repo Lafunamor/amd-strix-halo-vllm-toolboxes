@@ -75,12 +75,15 @@ toolbox create vllm \
   --device /dev/dri \
   --device /dev/kfd \
   --device /dev/infiniband \
-  --group-add video \
-  --group-add render \
-  --group-add rdma \
+  --group-add keep-groups \
   --ulimit memlock=-1 \
   --security-opt seccomp=unconfined
 ```
+
+> `--group-add keep-groups` passes your host `render`/`video`/`rdma` groups through. Named
+> `--group-add video --group-add render --group-add rdma` does **not** work under rootless
+> podman and aborts the container if the image lacks the group — see
+> [GPU Device Permissions](../README.md#61-gpu-device-permissions).
 
 The following Dockerfile is used for the toolbox: https://github.com/kyuz0/amd-strix-halo-vllm-toolboxes/blob/main/Dockerfile
 

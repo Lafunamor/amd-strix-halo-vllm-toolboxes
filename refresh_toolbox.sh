@@ -2,8 +2,10 @@
 
 set -e
 
-TOOLBOX_NAME="vllm"
-IMAGE_REPO="docker.io/kyuz0/vllm-therock-gfx1151"
+TOOLBOX_NAME="${TOOLBOX_NAME:-vllm}"
+# Override to use a different image family, e.g. the Ubuntu / stable-ROCm one:
+#   IMAGE_REPO=docker.io/kyuz0/vllm-rocm-gfx1151 ./refresh_toolbox.sh latest
+IMAGE_REPO="${IMAGE_REPO:-docker.io/kyuz0/vllm-therock-gfx1151}"
 
 # --- Channel selection (latest / dev) ---
 resolve_channel() {
@@ -40,13 +42,23 @@ resolve_channel() {
 CHANNEL="$(resolve_channel "${1:-}")"
 IMAGE="${IMAGE_REPO}:${CHANNEL}"
 
-# Base options
-OPTIONS="--device /dev/dri --device /dev/kfd --group-add video --group-add render --security-opt seccomp=unconfined"
+# Base options.
+#
+# GPU access uses --group-add keep-groups, NOT --group-add video/render. Under rootless podman
+# (what toolbx and distrobox use by default) a named --group-add resolves against the
+# CONTAINER's /etc/group and the resulting gid lives inside the user namespace — it never maps
+# to the host's video/render gid, so it grants no access to /dev/kfd or /dev/dri at all. Worse,
+# if the name is absent from the image podman refuses to start the container outright
+# ("unable to find group <name>: no matching entries in group file").
+# keep-groups (crun's keep_original_groups) passes your real HOST supplementary groups through,
+# which is what actually authorises /dev/kfd on a stock 0660 root:render device.
+OPTIONS="--device /dev/dri --device /dev/kfd --group-add keep-groups --security-opt seccomp=unconfined"
 
 # Check for InfiniBand devices
 if [ -d "/dev/infiniband" ]; then
     echo "🔎 InfiniBand devices detected! Adding RDMA support..."
-    OPTIONS="$OPTIONS --device /dev/infiniband --group-add rdma --ulimit memlock=-1"
+    # No --group-add rdma needed: keep-groups already carries the host's rdma group through.
+    OPTIONS="$OPTIONS --device /dev/infiniband --ulimit memlock=-1"
 else
     echo "ℹ️  No InfiniBand devices detected."
 fi
