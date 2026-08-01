@@ -103,8 +103,13 @@ To manually create a toolbox that exposes the GPU and relaxes seccomp:
 toolbox create vllm \
   --image docker.io/kyuz0/vllm-therock-gfx1151:latest \
   -- --device /dev/dri --device /dev/kfd \
-  --group-add video --group-add render --security-opt seccomp=unconfined
+  --group-add keep-groups --security-opt seccomp=unconfined
 ```
+
+> [!IMPORTANT]
+> Use `--group-add keep-groups`, **not** `--group-add video --group-add render`. See
+> [GPU device permissions](#61-gpu-device-permissions) — the named groups do not grant GPU
+> access under rootless podman and can stop the container from starting at all.
 
 Enter it:
 
@@ -133,12 +138,17 @@ Ubuntu’s toolbox package still breaks GPU access, so use Distrobox instead:
 ```bash
 distrobox create -n vllm \
   --image docker.io/kyuz0/vllm-therock-gfx1151:latest \
-  --additional-flags "--device /dev/kfd --device /dev/dri --group-add video --group-add render --security-opt seccomp=unconfined"
+  --additional-flags "--device /dev/kfd --device /dev/dri --group-add keep-groups --security-opt seccomp=unconfined"
 
 distrobox enter vllm
 ```
 
-> **Verification:** Run `rocm-smi` to check GPU status.
+The Ubuntu / stable-ROCm image works the same way — swap the `--image` for
+`docker.io/kyuz0/vllm-rocm-gfx1151:latest`.
+
+> **Verification:** Run `rocm-smi` to check GPU status. It should print your GPU name (e.g.
+> `Radeon 8060S Graphics`). If it reports `get_name, Failed to load a library` or no device at
+> all, see [GPU device permissions](#61-gpu-device-permissions).
 
 ### Serving a Model (Easiest Way)
 
@@ -198,7 +208,61 @@ docker run -p 3000:3000 \
 
 This should work on any Strix Halo. For a complete list of available hardware, see: [Strix Halo Hardware Database](https://strixhalo-homelab.d7.wtf/Hardware)
 
-### 6.1 Test Configuration
+### 6.1 GPU Device Permissions
+
+The container needs access to `/dev/kfd` (the ROCm compute device) and `/dev/dri/renderD*`. On
+most distributions these ship as mode **0660 `root:render`**, so access is granted by group
+membership. Add yourself to the groups once (log out and back in afterwards):
+
+```bash
+sudo usermod -aG render,video "$USER"
+```
+
+**Then pass those groups into the container with `--group-add keep-groups`.**
+
+> [!WARNING]
+> Do **not** use `--group-add video --group-add render`. Under **rootless podman** — the default
+> for both toolbx and distrobox — a *named* `--group-add` is resolved against the **container's**
+> `/etc/group`, and the resulting gid lives inside the user namespace. It never maps to the
+> host's `render`/`video` gid, so it grants **no** access to `/dev/kfd`. Two failure modes follow:
+>
+> * **Container refuses to start**, if the image has no such group:
+>   `Error: ... unable to find group render: no matching entries in group file`
+> * **Container starts but has no GPU**: `/dev/kfd` returns `EACCES` and `rocm-smi` reports
+>   `get_name, Failed to load a library` with no device name.
+>
+> `keep-groups` (crun's `keep_original_groups`) passes your **real host** supplementary groups
+> through, which is what actually authorises the device.
+
+**Rootful Docker** has no user namespace, so numeric **host** gids work there instead:
+
+```bash
+docker run --device /dev/kfd --device /dev/dri \
+  --group-add "$(getent group render | cut -d: -f3)" \
+  --group-add "$(getent group video  | cut -d: -f3)" ...
+```
+
+**Headless / multi-user hosts** may prefer relaxing the device modes instead of managing groups:
+
+```bash
+# /etc/udev/rules.d/70-kfd.rules
+SUBSYSTEM=="kfd", KERNEL=="kfd", MODE="0666"
+SUBSYSTEM=="drm", KERNEL=="renderD*", MODE="0666"
+```
+
+Reload with `sudo udevadm control --reload && sudo udevadm trigger`. This makes the devices
+world-accessible, which removes the group requirement entirely — convenient on a single-user
+box, but it does grant every local user GPU access.
+
+**Quick diagnosis** from inside the container:
+
+```bash
+id                                  # do you actually have the host render/video gids?
+ls -l /dev/kfd /dev/dri/renderD128  # 0660 needs group access; 0666 needs nothing
+rocm-smi --showproductname          # should print your GPU name
+```
+
+### 6.2 Test Configuration
 
 | Component         | Specification                                               |
 | :---------------- | :---------------------------------------------------------- |
@@ -208,7 +272,7 @@ This should work on any Strix Halo. For a complete list of available hardware, s
 | **GPU Memory**    | 512 MB allocated in BIOS                                    |
 | **Host OS**       | Fedora 43, Linux 6.18.5-200.fc43.x86_64            |
 
-### 6.2 Kernel Parameters (tested on Fedora 42)
+### 6.3 Kernel Parameters (tested on Fedora 42)
 
 Add these boot parameters to enable unified memory while reserving a minimum of 4 GiB for the OS (max 124 GiB for iGPU):
 

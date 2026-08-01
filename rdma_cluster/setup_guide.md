@@ -234,7 +234,11 @@ To install the toolbox on **both nodes**, run:
 2.  Detects if `/dev/infiniband` exists on your host.
 3.  Creates the toolbox with flags to expose:
     *   **iGPU Access**: `/dev/dri`, `/dev/kfd` (Required for ROCm)
-    *   **RDMA Access**: `/dev/infiniband`, `--group-add rdma`
+    *   **RDMA Access**: `/dev/infiniband`
+    *   **Group passthrough**: `--group-add keep-groups` — carries your host `render`, `video`
+        and `rdma` groups into the container. Named flags like `--group-add rdma` do **not**
+        work under rootless podman and abort the container when the image lacks that group;
+        see [GPU Device Permissions](../README.md#61-gpu-device-permissions).
     *   **Memory Pinning**: `--ulimit memlock=-1` (Required for DMA)
 
 ### 5.3 Verify RDMA Connection
