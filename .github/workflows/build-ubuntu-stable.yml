@@ -21,7 +21,11 @@ on:
   workflow_dispatch:
     inputs:
       vllm_ref:
-        description: "vLLM tag/commit to build (empty = latest stable release tag)"
+        description: "Upstream vLLM tag/branch/commit (not the image tag; empty = latest stable release)"
+        required: false
+        default: ""
+      image_tag:
+        description: "Optional Docker image tag (for example: dev); prevents updating latest"
         required: false
         default: ""
       force:
@@ -111,6 +115,8 @@ jobs:
           REF="docker.io/${{ steps.repo.outputs.repo }}:${{ steps.ver.outputs.version_tag }}"
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
             echo "force=true -> rebuilding regardless"; echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            echo "Custom image tag requested -> building and publishing it"; echo "skip=false" >> "$GITHUB_OUTPUT"
           elif docker buildx imagetools inspect "$REF" >/dev/null 2>&1; then
             echo "✅ $REF already exists — skipping"; echo "skip=true" >> "$GITHUB_OUTPUT"
           else
@@ -169,7 +175,8 @@ jobs:
           images: docker.io/${{ steps.repo.outputs.repo }}
           tags: |
             type=raw,value=${{ steps.ver.outputs.version_tag }}
-            type=raw,value=latest
+            type=raw,value=${{ github.event.inputs.image_tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag != '' }}
+            type=raw,value=latest,enable=${{ github.event_name != 'workflow_dispatch' || (github.event.inputs.vllm_ref == '' && github.event.inputs.image_tag == '') }}
             type=raw,value={{date 'YYYYMMDD-HHmmss'}}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
