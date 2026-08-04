@@ -1,0 +1,251 @@
+name: build-ubuntu-nightly
+
+# Ubuntu + ROCm **NIGHTLY** gfx1151 vLLM image — the bleeding-edge sibling of
+# build-ubuntu-stable.yml. Same Dockerfile, different package channel:
+#
+#   stable : https://repo.amd.com/rocm/whl-multi-arch/        torch 2.11.0+rocm7.14.0
+#   nightly: https://rocm.nightlies.amd.com/whl-multi-arch/   torch X+rocm10.1.0aYYYYMMDD
+#
+# NOTE the nightly index MOVED: the old per-arch paths (rocm.nightlies.amd.com/v2/gfx1151,
+# /v2-staging/gfx1151) are abandoned and frozen at 20260612. Current nightlies live under
+# whl-multi-arch/ in the same device-package layout as stable. Don't be fooled by the stale
+# paths — they still return 200.
+#
+# WEEKLY + manual on purpose: a new nightly lands every day and building each one is waste.
+# Publishes ONLY :nightly and an immutable :nightly-<combo>. It NEVER touches :latest —
+# that tag belongs to the stable pipeline.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"      # Mondays 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      vllm_ref:
+        description: "Upstream vLLM tag/branch/commit (empty = latest stable release tag)"
+        required: false
+        default: ""
+      force:
+        description: "Rebuild even if this exact nightly combo was already built"
+        type: boolean
+        required: false
+        default: false
+      keep:
+        description: "How many nightly tags to keep when pruning (default 3)"
+        required: false
+        default: "3"
+      discover_only:
+        description: "Only resolve + report the newest nightly stack; do NOT build"
+        type: boolean
+        required: false
+        default: false
+      torch_version:
+        description: "Pin torch (e.g. 2.11.0). Empty = auto-discover newest complete set"
+        required: false
+        default: ""
+      rocm_version:
+        description: "Pin rocm (e.g. 10.1.0a20260804). Must be set together with torch_version"
+        required: false
+        default: ""
+
+env:
+  DOCKER_BUILDKIT: "1"
+  ROCM_WHL: https://rocm.nightlies.amd.com/whl-multi-arch/
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image repo (from owner)
+        id: repo
+        run: |
+          set -euo pipefail
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "repo=${OWNER}/vllm-rocm-gfx1151" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve newest COMPLETE nightly stack
+        id: ver
+        run: |
+          set -euo pipefail
+          # Nightlies publish the 4 torch packages at slightly different times, and torchaudio
+          # usually lags (it often only exists for the OLDEST torch minor of the day). So walk
+          # candidates newest-first BY BUILD DATE and take the first fully-aligned set:
+          #   torch + amd-torch-device-gfx1151 + torchvision(0.[minor+15]) + torchaudio
+          #   + rocm-sdk-devel + rocm-sdk-device-gfx1151   (all sharing one +rocm<V>)
+          # Manual pins win over auto-discovery (both must be given).
+          PIN_T="${{ github.event.inputs.torch_version }}"; PIN_R="${{ github.event.inputs.rocm_version }}"
+          if [ -n "$PIN_T" ] && [ -n "$PIN_R" ]; then
+            echo "Using PINNED stack: torch ${PIN_T}+rocm${PIN_R}"
+            echo "torch_ver=${PIN_T}" >> "$GITHUB_OUTPUT"
+            echo "rocm_ver=${PIN_R}"  >> "$GITHUB_OUTPUT"
+            echo "resolved=${PIN_T}+rocm${PIN_R}" >> "$GITHUB_OUTPUT"
+          else
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import urllib.request, re, sys
+          B = "${{ env.ROCM_WHL }}".rstrip("/")
+          def vers(pkg):
+              u = pkg.replace('-', '_')
+              try:
+                  h = urllib.request.urlopen(f"{B}/{pkg}/", timeout=30).read().decode()
+              except Exception as e:
+                  print(f"::error::cannot read {pkg}: {e}", file=sys.stderr); raise
+              return set(re.findall(rf"{u}-([0-9][0-9a-z.+]*)-(?:cp312|py3)", h))
+          torch = vers("torch"); dev = vers("amd-torch-device-gfx1151")
+          tv = vers("torchvision"); ta = vers("torchaudio")
+          sdkd = vers("rocm-sdk-devel"); sdkg = vers("rocm-sdk-device-gfx1151")
+          def date_of(v):
+              m = re.search(r"a(20\d{6})", v); return m.group(1) if m else "0"
+          cands = sorted({v for v in torch if "+rocm" in v}, key=date_of, reverse=True)
+          for c in cands:
+              t, r = c.split("+rocm", 1)
+              minor = int(t.split(".")[1]); tvpfx = f"0.{minor+15}."
+              tvm = [x for x in tv if x.startswith(tvpfx) and x.endswith("+rocm"+r)]
+              tam = [x for x in ta if x.startswith(t+"+rocm"+r)]
+              if c in dev and tvm and tam and r in sdkd and r in sdkg:
+                  print(f"torch_ver={t}"); print(f"rocm_ver={r}")
+                  print(f"resolved={c}")
+                  sys.stderr.write(f"Resolved nightly: torch {c} | torchvision {tvm[0]} | "
+                                   f"torchaudio {tam[0]} | rocm-sdk {r}\n")
+                  break
+          else:
+              print("::error::no complete nightly gfx1151 stack found", file=sys.stderr); sys.exit(1)
+          PY
+          fi
+          # vLLM: manual override, else latest stable release tag (skip rc/dev/a/b).
+          VLLM_REF="${{ github.event.inputs.vllm_ref }}"
+          if [ -z "$VLLM_REF" ]; then
+            VLLM_REF=$(git ls-remote --tags --refs https://github.com/vllm-project/vllm.git \
+              | awk '{print $2}' | sed 's#refs/tags/##' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+          fi
+          VLLM_SLUG=$(echo "${VLLM_REF#v}" | sed 's/[^A-Za-z0-9._-]/-/g' | cut -c1-24)
+          echo "vllm_ref=${VLLM_REF}" >> "$GITHUB_OUTPUT"
+          echo "vllm_slug=${VLLM_SLUG}" >> "$GITHUB_OUTPUT"
+
+      - name: Compose version tag
+        id: tag
+        run: |
+          set -euo pipefail
+          # rocm_ver already embeds the nightly date, so this is unique per build.
+          echo "version_tag=nightly-rocm${{ steps.ver.outputs.rocm_ver }}-torch${{ steps.ver.outputs.torch_ver }}-vllm${{ steps.ver.outputs.vllm_slug }}" >> "$GITHUB_OUTPUT"
+
+      - name: Report resolved stack
+        run: |
+          {
+            echo "### Nightly stack resolved"
+            echo ""
+            echo "| item | value |"
+            echo "|---|---|"
+            echo "| channel | \`${{ env.ROCM_WHL }}\` |"
+            echo "| torch | \`${{ steps.ver.outputs.torch_ver }}+rocm${{ steps.ver.outputs.rocm_ver }}\` |"
+            echo "| rocm-sdk | \`${{ steps.ver.outputs.rocm_ver }}\` |"
+            echo "| vLLM | \`${{ steps.ver.outputs.vllm_ref }}\` |"
+            echo "| image tag | \`${{ steps.tag.outputs.version_tag }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop here if discover_only
+        if: github.event.inputs.discover_only == 'true'
+        run: |
+          echo "discover_only=true — resolved the stack above, not building."
+          echo "_discover_only: no image was built._" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Log in to Docker Hub
+        if: github.event.inputs.discover_only != 'true' 
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Check if this nightly combo already exists
+        id: check
+        if: github.event.inputs.discover_only != 'true'
+        run: |
+          set -uo pipefail
+          REF="docker.io/${{ steps.repo.outputs.repo }}:${{ steps.tag.outputs.version_tag }}"
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            echo "force=true -> rebuilding"; echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif docker buildx imagetools inspect "$REF" >/dev/null 2>&1; then
+            echo "✅ $REF exists — skipping"; echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "🆕 $REF not found — building"; echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Put Docker on /mnt
+        if: steps.check.outputs.skip != 'true' && github.event.inputs.discover_only != 'true'
+        run: |
+          set -eux
+          echo '{ "data-root": "/mnt/docker" }' | sudo tee /etc/docker/daemon.json
+          sudo systemctl stop docker; sudo rm -rf /var/lib/docker || true
+          sudo mkdir -p /mnt/docker; sudo systemctl start docker
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Free disk space
+        if: steps.check.outputs.skip != 'true' && github.event.inputs.discover_only != 'true'
+        run: |
+          set -euxo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache || true
+          docker system prune -af || true; docker builder prune -af || true
+          sudo apt-get clean; sudo rm -rf /var/lib/apt/lists/*
+          df -h
+
+      - name: Set up Buildx
+        if: steps.check.outputs.skip != 'true' && github.event.inputs.discover_only != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push
+        if: steps.check.outputs.skip != 'true' && github.event.inputs.discover_only != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # Same Dockerfile as the stable image — it is fully parameterised (ROCM_WHL /
+          # TORCH_VERSION / ROCM_VERSION). Only the channel and versions differ.
+          file: ./Dockerfile.ubuntu-repoamd
+          platforms: linux/amd64
+          push: true
+          # NOTE: no :latest here — that belongs to the stable pipeline.
+          tags: |
+            docker.io/${{ steps.repo.outputs.repo }}:${{ steps.tag.outputs.version_tag }}
+            docker.io/${{ steps.repo.outputs.repo }}:nightly
+          build-args: |
+            ROCM_WHL=${{ env.ROCM_WHL }}
+            TORCH_VERSION=${{ steps.ver.outputs.torch_ver }}
+            ROCM_VERSION=${{ steps.ver.outputs.rocm_ver }}
+            VLLM_REF=${{ steps.ver.outputs.vllm_ref }}
+          provenance: false
+          sbom: false
+          # Separate cache ref so nightly layers can never contaminate the stable image.
+          cache-from: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache-nightly
+          cache-to: type=registry,ref=docker.io/${{ steps.repo.outputs.repo }}:buildcache-nightly,mode=max,image-manifest=true,oci-mediatypes=true
+
+      - name: Prune old nightly tags on Docker Hub
+        if: steps.check.outputs.skip != 'true' && github.event.inputs.discover_only != 'true'
+        env:
+          KEEP: ${{ github.event.inputs.keep || '3' }}
+        run: |
+          set -euo pipefail
+          # Nightlies accumulate fast. Keep the newest $KEEP immutable nightly-* tags and
+          # delete the rest. Never touches :nightly, :latest, or any buildcache/stable tag.
+          TOKEN=$(curl -s -H "Content-Type: application/json" \
+            -d "{\"username\":\"${{ secrets.DOCKERHUB_USERNAME }}\",\"password\":\"${{ secrets.DOCKERHUB_TOKEN }}\"}" \
+            https://hub.docker.com/v2/users/login/ | jq -r '.token // empty')
+          [ -n "$TOKEN" ] || { echo "::warning::Docker Hub login failed — skipping prune"; exit 0; }
+          REPO="${{ steps.repo.outputs.repo }}"
+          # Only the immutable nightly-<combo> tags; never :nightly, :latest or buildcache-*.
+          TAGS=$(curl -s -H "Authorization: JWT $TOKEN" \
+            "https://hub.docker.com/v2/repositories/${REPO}/tags/?page_size=100&ordering=-last_updated" \
+            | jq -r '.results[].name | select(startswith("nightly-"))')
+          i=0
+          for t in $TAGS; do
+            i=$((i+1))
+            if [ "$i" -le "$KEEP" ]; then echo "keep   $t"; continue; fi
+            echo "delete $t"
+            curl -s -X DELETE -H "Authorization: JWT $TOKEN" \
+              "https://hub.docker.com/v2/repositories/${REPO}/tags/${t}/" >/dev/null || \
+              echo "::warning::failed to delete $t"
+          done
+
+      - name: Prune buildx cache
+        if: always()
+        run: docker buildx prune -af --verbose --min-free-space 4gb || true
