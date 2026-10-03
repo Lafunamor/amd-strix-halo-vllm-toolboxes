@@ -85,6 +85,13 @@ the packaged `scripts/gfx1x_tilelang_mqa.py` and
 | new `vllm/v1/attention/ops/gfx1x_radix_topk.py` | Deterministic radix threshold selection plus ordered integer compaction. It emits local prefill indices or global decode indices already ascending, with `-1` padding, without atomics or full-row sort scratch. Adapted from AlexKGwyn/ds4-vllm-public commit `95c45bb94f324fcf3f58ec1f5eaf2d1aaceb87ff`. | Compare against the stable reference for both histogram modes and every served top-k. Recheck Triton histogram lowering, float-to-key ordering, tie behavior, row bounds, output strides, `-inf` handling, and maximum context. Remove if upstream gains deterministic performant ROCm selection. |
 | new `vllm/model_executor/kernels/linear/scaled_mm/gfx1x_w8a8_bf16.py` | Caches each block-dequantized BF16 weight, sends small-M decode through `rocm_unquantized_gemm_impl`/gfx1x skinny GEMM, and optionally reuses warm weights for prefill. Adapted from AlexKGwyn/ds4-vllm-public. | Revalidate scale orientation and dtype, weight layout, skinny-GEMM dispatch, cache lifetime, temporary FP32 peak, BF16 cache size, output quality, and cold/warm behavior. Never infer end-to-end speed from the source project's per-kernel claim. |
 
+**AITER's `flydsl` dependency.** The aiter wheel is installed with `--no-deps` to keep pip away from
+the torch stack, so AITER's hard `flydsl==X` requirement is installed explicitly, with the version read
+from aiter's own metadata (v0.1.19 -> 0.2.4, v0.1.23 -> 0.3.4.1). Before v0.1.23 the gap only produced a
+pip warning; v0.1.23 imports `topk_select` -> `aiter.ops.flydsl` from `aiter/__init__.py`, so a missing
+flydsl breaks the entire aiter import. `flash_attn_interface`'s soft aiter import then yields
+`flash_attn_gpu = None` and vLLM fails at `varlen_fwd` on a build that passed every CI check.
+
 Build markers:
 
 - `PATCHED: gfx1x TileLang sparse-indexer MQA`
