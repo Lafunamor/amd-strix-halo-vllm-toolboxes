@@ -10,7 +10,7 @@ The current build inputs are:
 |---|---|
 | ROCm wheels | `10.0.0` |
 | PyTorch | `2.11.0+rocm10.0.0` |
-| AITER | `v0.1.19` |
+| AITER | `v0.1.23` (the tag vLLM 0.31 pins in `docker/Dockerfile.rocm_base`) |
 | vLLM stable fallback | `v0.27.1` / `6e448d0ea9bf3d88d898b65449ca6dc2aec170ac` |
 | vLLM validated development baseline | `v0.27.2rc1.dev16` / `79f3183f86b89c3bda05d467041bf3ef9ef60426` |
 | conch-triton-kernels | `1.2.1` (from vLLM `requirements/rocm.txt`) |

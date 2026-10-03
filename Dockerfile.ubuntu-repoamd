@@ -65,7 +65,7 @@ RUN python -m pip install --upgrade pip wheel packaging "setuptools<80.0.0" "set
 ARG ROCM_WHL=https://stable.repo.amd.com/rocm/whl-next/
 ARG TORCH_VERSION=2.11.0
 ARG ROCM_VERSION=10.0.0
-ARG AITER_REF=v0.1.19
+ARG AITER_REF=v0.1.23
 RUN set -e; \
     TV_MINOR=$(( $(echo "${TORCH_VERSION}" | cut -d. -f2) + 15 )); \
     TORCHVISION="0.${TV_MINOR}.0+rocm${ROCM_VERSION}"; \
@@ -188,7 +188,7 @@ RUN ROOT=$(rocm-sdk path --root) && \
 RUN python -m pip install ray
 
 
-# AITER v0.1.19 detects the native GPU while importing and therefore cannot be imported on
+# AITER (seen on v0.1.19) detects the native GPU while importing and therefore cannot be imported on
 # GitHub's GPU-less image builder. Verify the package is installed without executing it;
 # model-specific modules, including DeepSeek-V4 MHC, JIT-compile on the target gfx1151 host.
 RUN python -c "import importlib.util; assert importlib.util.find_spec('aiter'); print('aiter package installed OK')"
