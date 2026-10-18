@@ -65,7 +65,7 @@ RUN python -m pip install --upgrade pip wheel packaging "setuptools<80.0.0" "set
 ARG ROCM_WHL=https://stable.repo.amd.com/rocm/whl-next/
 ARG TORCH_VERSION=2.11.0
 ARG ROCM_VERSION=10.0.0
-ARG AITER_REF=v0.1.23
+ARG AITER_REF=v0.1.24.post1
 RUN set -e; \
     TV_MINOR=$(( $(echo "${TORCH_VERSION}" | cut -d. -f2) + 15 )); \
     TORCHVISION="0.${TV_MINOR}.0+rocm${ROCM_VERSION}"; \
