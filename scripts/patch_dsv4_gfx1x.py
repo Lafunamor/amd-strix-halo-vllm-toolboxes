@@ -269,13 +269,8 @@ def patch_cached_bf16_w8a8_linear(path: Path) -> bool:
     )
     source = _replace_once(
         source,
-        "from .ScaledMMLinearKernel import (\n"
-        "    Int8ScaledMMLinearLayerConfig,\n"
-        ")\n\n\n"
-        "class TritonInt8ScaledMMLinearKernel",
-        "from .ScaledMMLinearKernel import (\n"
-        "    Int8ScaledMMLinearLayerConfig,\n"
-        ")\n\n\n"
+        "\n\n\nclass TritonInt8ScaledMMLinearKernel",
+        "\n\n\n"
         "def _on_gfx1x() -> bool:\n"
         "    if not current_platform.is_rocm():\n"
         "        return False\n"
