@@ -149,12 +149,28 @@ COPY scripts/patch_conch_moe_gfx1x.py /opt/patch_conch_moe_gfx1x.py
 COPY scripts/gfx1x_tilelang_mqa.py /opt/vllm/vllm/v1/attention/ops/gfx1x_tilelang_mqa.py
 COPY scripts/gfx1x_radix_topk.py /opt/vllm/vllm/v1/attention/ops/gfx1x_radix_topk.py
 COPY scripts/gfx1x_w8a8_bf16.py /opt/vllm/vllm/model_executor/kernels/linear/scaled_mm/gfx1x_w8a8_bf16.py
+# EXPERIMENTAL opt-in FP8 (W8A8) kernel for per-tensor/per-channel checkpoints, active only with
+# VLLM_STRIX_FP8_TRITON=1 (see scripts/patch_fp8_kernels.py). Its decode GEMV comes from
+# @leonyurko's fp8_triton.py (PolyForm Noncommercial 1.0.0, not vendored here); it is fetched at
+# a pinned commit into the venv with its LICENSE/NOTICE, where gfx1x_fp8_hybrid.py finds it.
+ARG FP8_KERNELS_REF=50424f5525b8382353551e3301d0da56eca0be2b
+RUN git clone https://github.com/leonyurko/vllm-fp8-strix-halo-kernel-support.git /tmp/strix-fp8 && \
+    git -C /tmp/strix-fp8 checkout "$FP8_KERNELS_REF" && \
+    mkdir -p /opt/venv/share/strix-fp8 && \
+    cp /tmp/strix-fp8/fp8_triton.py /tmp/strix-fp8/LICENSE /tmp/strix-fp8/NOTICE \
+      /opt/venv/share/strix-fp8/ && \
+    rm -rf /tmp/strix-fp8
+COPY scripts/gfx1x_fp8_hybrid.py /opt/vllm/vllm/model_executor/kernels/linear/scaled_mm/gfx1x_fp8_hybrid.py
+COPY scripts/patch_fp8_kernels.py /opt/vllm/patch_fp8_kernels.py
 RUN python /opt/vllm/patch_strix.py && \
+    python /opt/vllm/patch_fp8_kernels.py && \
     python /opt/vllm/verify_vllm_compat.py
 RUN python -m py_compile \
       /opt/vllm/vllm/v1/attention/ops/gfx1x_tilelang_mqa.py \
       /opt/vllm/vllm/v1/attention/ops/gfx1x_radix_topk.py \
       /opt/vllm/vllm/model_executor/kernels/linear/scaled_mm/gfx1x_w8a8_bf16.py \
+      /opt/vllm/vllm/model_executor/kernels/linear/scaled_mm/gfx1x_fp8_hybrid.py \
+      /opt/venv/share/strix-fp8/fp8_triton.py \
     && grep -q "PATCHED: gfx1x TileLang sparse-indexer MQA" \
       /opt/vllm/vllm/v1/attention/ops/rocm_aiter_mla_sparse.py \
     && grep -q "PATCHED: gfx1x deterministic radix top-k" \
@@ -162,7 +178,9 @@ RUN python -m py_compile \
     && grep -q "PATCHED: gfx1x block-FP8 GEMM uses BF16 tl.dot" \
       /opt/vllm/vllm/model_executor/layers/quantization/utils/fp8_utils.py \
     && grep -q "PATCHED: gfx1x cached-BF16 W8A8 linear" \
-      /opt/vllm/vllm/model_executor/kernels/linear/scaled_mm/triton.py
+      /opt/vllm/vllm/model_executor/kernels/linear/scaled_mm/triton.py \
+    && grep -q "PATCHED: gfx1x Strix FP8 hybrid kernel" \
+      /opt/vllm/vllm/model_executor/kernels/linear/__init__.py
 RUN grep -q "rocm_aiter_ops.refresh_env_variables()" \
       /opt/vllm/vllm/v1/executor/ray_executor_v2.py \
     && grep -q "refresh_gfx1x_w8a8_env()" \
