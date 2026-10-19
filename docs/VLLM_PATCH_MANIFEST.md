@@ -319,4 +319,6 @@ Build marker:
 
 - `PATCHED: gfx1x Strix FP8 hybrid kernel`
 
-Serve without `--enforce-eager`: the GEMV only beats BF16 decode in compiled mode with CUDA graphs.
+`--enforce-eager` works (22.9 vs 23.6 tok/s compiled on Llama-3.1-8B) because this class requests no
+eager-mode padding; if it ever inherits from `TorchFP8ScaledMMLinearKernel`, eager mode would pad
+to 17 rows and the GEMV would stop running.

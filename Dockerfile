@@ -95,7 +95,7 @@ RUN python /opt/vllm/patch_strix.py
 # checkpoints. patch_fp8_kernels.py registers gfx1x_fp8_hybrid.py, active only with
 # VLLM_STRIX_FP8_TRITON=1: single-row decode runs @leonyurko's FP8 GEMV
 # (fp8_triton.fp8_gemm, on PYTHONPATH from /opt/fp8), everything else a BF16 copy of
-# the weight. Serve with VLLM_ROCM_USE_AITER=0 and WITHOUT --enforce-eager.
+# the weight. Serve with VLLM_ROCM_USE_AITER=0; --enforce-eager is no longer needed.
 # https://github.com/leonyurko/vllm-fp8-strix-halo-kernel-support
 ARG FP8_KERNELS_REF=50424f5525b8382353551e3301d0da56eca0be2b
 RUN git clone https://github.com/leonyurko/vllm-fp8-strix-halo-kernel-support.git /opt/fp8 && \

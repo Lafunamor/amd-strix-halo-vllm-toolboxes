@@ -267,6 +267,38 @@ adapted from `AlexKGwyn/ds4-vllm-public`; it must pass exact selection and
 long-context recall checks whenever vLLM, Triton, or the sparse-indexer layout
 changes.
 
+### FP8 (W8A8) checkpoints — experimental, opt-in
+
+gfx1151 has no native FP8, so stock vLLM rejects per-tensor and per-channel
+FP8 checkpoints (e.g. `RedHatAI/...-FP8-dynamic`) with "Failed to find a
+kernel that can implement the ScaledMM linear layer". Setting
+`VLLM_STRIX_FP8_TRITON=1` registers a gfx1151 kernel that loads them: single-
+stream decode runs @leonyurko's FP8 GEMV, while prefill and batched decode run
+a BF16 copy of each weight. The `RedHatAI/Meta-Llama-3.1-8B-Instruct-FP8-dynamic`
+profile in `start-vllm` sets the variable (plus `VLLM_ROCM_USE_AITER=0`) for you.
+
+Measured on Llama-3.1-8B (vLLM 0.32, TP=1), against the BF16 model:
+
+| | weights | prefill | 1-stream decode | 4-stream decode |
+|---|---:|---:|---:|---:|
+| BF16 | 15.0 GiB | 1774 tok/s | 13.8 tok/s | 49.7 tok/s |
+| FP8 + this kernel | 22.0 GiB | 1768 tok/s | 23.6 tok/s | 49.5 tok/s |
+
+Know before using it:
+
+* **Memory goes up, not down.** The FP8 weight and its BF16 copy are both
+  resident, about 1.5x the BF16 model. Use it for single-user decode speed, not
+  to fit a bigger model.
+* **`--enforce-eager` is no longer required** (earlier FP8 instructions asked
+  for it). It still works; the profile leaves it off because compiled mode
+  measured about 3% faster decode.
+* **Quality is only sanity-checked** (short greedy arithmetic and text probes),
+  and only this one model has been tested. Block-scaled (DeepSeek-style) FP8
+  does not use this path.
+* `fp8_triton.py` comes from `leonyurko/vllm-fp8-strix-halo-kernel-support`
+  under the **PolyForm Noncommercial 1.0.0** license. The Ubuntu image keeps it
+  with its LICENSE in `/opt/venv/share/strix-fp8/`, the Fedora image in `/opt/fp8/`.
+
 ## 8) DeepSeek V4 DSpark and automatic warmup
 
 `deepseek-ai/DeepSeek-V4-Flash-0731` now defaults to vLLM's native AMD DSpark

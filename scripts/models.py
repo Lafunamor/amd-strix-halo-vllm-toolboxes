@@ -35,7 +35,7 @@ MODEL_TABLE = {
     # VLLM_STRIX_FP8_TRITON=1 registers it; without it no stock ROCm kernel accepts
     # FP8 on gfx1151 and the model does not load. Single-row decode runs @leonyurko's
     # FP8 GEMV, everything else a BF16 weight copy (weights ~1.5x the BF16 model).
-    # Keep enforce_eager off: the GEMV gain needs compiled mode + CUDA graphs.
+    # enforce_eager is no longer needed; compiled mode measured ~3% faster decode.
     "RedHatAI/Meta-Llama-3.1-8B-Instruct-FP8-dynamic": {
         "trust_remote": False,
         "valid_tp": [1],

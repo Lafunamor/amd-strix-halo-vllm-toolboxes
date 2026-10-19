@@ -18,9 +18,9 @@ memory, so the KV-cache sizing sees it. Weight memory is FP8 + BF16, about
 1.5x the BF16 checkpoint.
 
 Both paths sit inside one torch custom op so torch.compile and CUDA graphs see
-a single opaque call. Do not serve with --enforce-eager: eager mode makes the
-stock torch kernels pad activations to 17 rows; this kernel requests no
-padding, but compiled mode is still what measured 1.7x BF16 decode.
+a single opaque call. Unlike the stock torch FP8 kernels, this class requests
+no eager-mode activation padding (those pad to 17 rows, which would hide the
+one-row case), so --enforce-eager works; compiled mode measured ~3% faster.
 
 The fp8_triton module is not part of this repository (PolyForm Noncommercial
 1.0.0). Images fetch it at a pinned commit; VLLM_STRIX_FP8_KERNELS_DIR points
