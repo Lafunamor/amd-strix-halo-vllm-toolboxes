@@ -304,10 +304,21 @@ accidentally resurrected.
 | `scripts/patch_aiter_headers.py` -> `aiter_meta/csrc/include/ck_tile/vec_convert.h` | Replaces unsupported packed CDNA FP8 instructions with scalar RDNA fallbacks and supplies the needed FP4 types/conversions. | Diff against AITER's current header, compile representative JIT modules on gfx1151, and remove once upstream carries correct RDNA implementations. |
 | rdma-core `v62.0` overlay | Replaces Ubuntu 24.04's rdma-core 50/libirdma provider, which produced RCCL `Unknown completion` errors with the host irdma driver. | Run the two-rank RCCL all-reduce over RoCE. Upgrade only as a matched libibverbs/provider set; do not mix provider ABIs. |
 
-## Legacy image note
+## Opt-in per-tensor/per-channel FP8 (W8A8) linear
 
-The old Fedora `Dockerfile` has a separate, experimental
-`scripts/patch_fp8_kernels.py` path and external
-`leonyurko/vllm-fp8-strix-halo-kernel-support` modules. That is not part of the
-Ubuntu stable image documented above. If the legacy image is changed, audit its
-patch stack separately rather than assuming this manifest covers it.
+Owned by `scripts/patch_fp8_kernels.py` and the packaged `scripts/gfx1x_fp8_hybrid.py`; both
+images carry it. Inactive unless `VLLM_STRIX_FP8_TRITON=1` is set at serve time.
+
+| Upstream path | Local behavior | Update audit |
+|---|---|---|
+| `vllm/model_executor/kernels/linear/__init__.py` | Appends a call that inserts `StrixFP8HybridScaledMMLinearKernel` at the head of `_POSSIBLE_FP8_KERNELS[ROCM]` when the env gate is set. Without it, every stock ROCm FP8 kernel rejects gfx1151 and the checkpoint fails to load. | Check the registry name and the `FP8ScaledMMLinearKernel` interface (`_get_layer_params`, `quant_fp8`, `apply_weights`). Remove when upstream ships a gfx1x per-tensor/per-channel FP8 kernel that beats BF16 decode. |
+| new `vllm/model_executor/kernels/linear/scaled_mm/gfx1x_fp8_hybrid.py` | Builds a BF16 copy of each FP8 weight in `process_weights_after_loading` (before memory profiling). One custom op, `strix::fp8_hybrid_linear`, runs one-row calls through `fp8_triton.fp8_gemm` (FP8 GEMV) and all other calls through `rocm_unquantized_gemm_impl` with the unquantized activation. | Recheck the scheme's weight layout (`(K, N)` view) and scale shapes, `rocm_unquantized_gemm_impl`'s signature, and that the stock torch kernels' eager-mode padding to 17 rows still does not apply to this class. Re-measure M=1 decode against BF16 after any `fp8_triton` bump. |
+| fetched `fp8_triton.py` (`FP8_KERNELS_REF`) | @leonyurko's FP8 GEMV, PolyForm Noncommercial 1.0.0; not vendored. Ubuntu image: `/opt/venv/share/strix-fp8/` with its LICENSE/NOTICE. Fedora image: `/opt/fp8` on `PYTHONPATH`. | Check the `fp8_gemm(A, B, scale_a, scale_b, out_dtype, bias)` signature and that the GEMV output buffer is still reused per N (the op copies out of it). |
+
+Build marker:
+
+- `PATCHED: gfx1x Strix FP8 hybrid kernel`
+
+`--enforce-eager` works (22.9 vs 23.6 tok/s compiled on Llama-3.1-8B) because this class requests no
+eager-mode padding; if it ever inherits from `TorchFP8ScaledMMLinearKernel`, eager mode would pad
+to 17 rows and the GEMV would stop running.

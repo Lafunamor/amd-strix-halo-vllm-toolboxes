@@ -31,15 +31,15 @@ MODEL_TABLE = {
         ]
     },
 
-    # EXPERIMENTAL — FP8 (W8A8) via @leonyurko's Strix Halo Triton kernels (#67).
-    # The "env" VLLM_STRIX_FP8_TRITON=1 opts this model into the patched fp8_triton
-    # path (default-off; without it FP8 uses stock torch._scaled_mm). The kernels
-    # require VLLM_ROCM_USE_AITER=0 + enforce_eager. Correctness-verified on gfx1151,
-    # not yet benchmarked.
+    # EXPERIMENTAL — FP8 (W8A8) via the gfx1x hybrid kernel (#67). The "env"
+    # VLLM_STRIX_FP8_TRITON=1 registers it; without it no stock ROCm kernel accepts
+    # FP8 on gfx1151 and the model does not load. Single-row decode runs @leonyurko's
+    # FP8 GEMV, everything else a BF16 weight copy (weights ~1.5x the BF16 model).
+    # enforce_eager is no longer needed; compiled mode measured ~3% faster decode.
     "RedHatAI/Meta-Llama-3.1-8B-Instruct-FP8-dynamic": {
         "trust_remote": False,
         "valid_tp": [1],
-        "enforce_eager": True,
+        "enforce_eager": False,
         "env": {"VLLM_STRIX_FP8_TRITON": "1", "VLLM_ROCM_USE_AITER": "0"},
         "max_num_seqs": "64",
         "max_tokens": "32768",

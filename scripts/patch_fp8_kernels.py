@@ -1,78 +1,51 @@
 import sys
 from pathlib import Path
 
-# FP8 (W8A8) Strix Halo kernel routing for vLLM.
+# FP8 (W8A8) Strix Halo kernel registration for vLLM (EXPERIMENTAL, opt-in).
 # Kernels: https://github.com/leonyurko/vllm-fp8-strix-halo-kernel-support
-# (the kernel modules — fp8_triton.py etc. — are placed on PYTHONPATH, e.g. /opt/fp8).
 #
-# gfx1151 has no native FP8 tensor support. This injects a routing shim into vLLM's
-# compressed-tensors W8A8-FP8 scaled-mm path that *optionally* uses @leonyurko's fused
-# FP8->bf16 Triton dequant-GEMM (fp8_triton.fp8_gemm).
+# gfx1151 has no native FP8 tensor support, so every stock ROCm FP8 scaled-mm
+# kernel rejects it and per-tensor/per-channel FP8 checkpoints fail to load
+# ("Failed to find a kernel that can implement the ScaledMM linear layer").
+# The previous version of this script swapped torch._scaled_mm call sites, but
+# the kernels owning those sites never pass the gfx1151 support check, so it
+# never ran.
 #
-# OPT-IN: the shim only routes to the Triton kernel when the env var
-# VLLM_STRIX_FP8_TRITON=1 is set at serve time; otherwise it calls the stock
-# torch._scaled_mm (upstream behavior unchanged). This keeps the kernels off the
-# default path — they override stock/hipBLASLt FP8, require --enforce-eager +
-# VLLM_ROCM_USE_AITER=0, and aren't benchmarked — so they're only used when
-# consciously activated (per kyuz0's suggestion on #67).
+# This registers StrixFP8HybridScaledMMLinearKernel (gfx1x_fp8_hybrid.py, copied
+# into vllm/model_executor/kernels/linear/scaled_mm/ by the Dockerfile) at the
+# head of the ROCm FP8 kernel list. It only does so when VLLM_STRIX_FP8_TRITON=1
+# is set at serve time, so the default path stays upstream.
 #
-# Deliberately a SEPARATE patch file (NOT patch_strix.py) so the FP8 work stays
-# independent of the is_integrated memory PR (#66). Surgical call-swap (not a file
-# overlay): preserves vLLM's current scale-handling in apply_scaled_mm, only
-# redirecting the GEMM call. No-ops if already applied.
+# Run from the vLLM source root. No-ops if already applied; fails the build if
+# the anchor is gone so an inert integration cannot ship silently.
 
-SCALED_MM_FB = '''
+MARKER = "# PATCHED: gfx1x Strix FP8 hybrid kernel"
+REGISTRATION = f'''
 
-import os as _os
-_VLLM_STRIX_FP8_TRITON = _os.environ.get("VLLM_STRIX_FP8_TRITON") == "1"
+{MARKER} (opt-in: VLLM_STRIX_FP8_TRITON=1)
+from vllm.model_executor.kernels.linear.scaled_mm.gfx1x_fp8_hybrid import (  # noqa: E402
+    register as _register_strix_fp8_hybrid,
+)
 
-
-def _scaled_mm_fb(A, B, *, out_dtype, scale_a, scale_b, bias=None):
-    # Default: stock torch._scaled_mm (upstream behavior, incl. any hipBLASLt FP8).
-    # Opt-in (VLLM_STRIX_FP8_TRITON=1): gfx1151 fused FP8->bf16 Triton dequant GEMM
-    # from leonyurko/vllm-fp8-strix-halo-kernel-support (fp8_triton on PYTHONPATH),
-    # with a bf16 matmul + manual dequant fallback if the kernel is unavailable.
-    if not _VLLM_STRIX_FP8_TRITON:
-        return torch._scaled_mm(
-            A, B, out_dtype=out_dtype, scale_a=scale_a, scale_b=scale_b, bias=bias
-        )
-    try:
-        from fp8_triton import fp8_gemm
-        return fp8_gemm(A.contiguous(), B, scale_a, scale_b, out_dtype, bias)
-    except Exception:
-        o = (A.to(torch.bfloat16) @ B.to(torch.bfloat16)).to(torch.float32)
-        sa = scale_a.to(torch.float32).reshape(-1)
-        sb = scale_b.to(torch.float32).reshape(-1)
-        o = o * (sa if sa.numel() == 1 else sa.view(-1, 1))
-        o = o * (sb if sb.numel() == 1 else sb.view(1, -1))
-        if bias is not None:
-            o = o + bias.to(torch.float32)
-        return o.to(out_dtype)
+_register_strix_fp8_hybrid()
 '''
 
 
 def patch_fp8():
-    print("Applying Strix Halo FP8 Triton kernel routing to vLLM (opt-in via VLLM_STRIX_FP8_TRITON)...")
-    p = Path('vllm/model_executor/kernels/linear/scaled_mm/pytorch.py')
-    if not p.exists():
-        print(" -> FP8 patch: scaled_mm/pytorch.py not found; skipping (vLLM layout changed?)")
-        return
+    print("Registering the Strix Halo FP8 hybrid kernel (opt-in via VLLM_STRIX_FP8_TRITON)...")
+    kernel = Path("vllm/model_executor/kernels/linear/scaled_mm/gfx1x_fp8_hybrid.py")
+    if not kernel.exists():
+        sys.exit(f"ERROR: {kernel} missing; copy scripts/gfx1x_fp8_hybrid.py first.")
+    p = Path("vllm/model_executor/kernels/linear/__init__.py")
     txt = p.read_text()
-    if '_scaled_mm_fb' in txt:
+    if MARKER in txt:
         print(" -> FP8 patch: already applied; skipping")
         return
-    n = txt.count('output = torch._scaled_mm(')
-    if n == 0:
-        print(" -> FP8 patch: no 'output = torch._scaled_mm(' call sites found; skipping")
-        return
-    # 1) redirect the apply_scaled_mm GEMM calls through the opt-in shim
-    txt = txt.replace('output = torch._scaled_mm(', 'output = _scaled_mm_fb(')
-    # 2) inject the routing shim at module scope (reads the env var once at import)
-    txt = txt + SCALED_MM_FB
-    p.write_text(txt)
-    print(f" -> FP8 patch: routed {n} scaled_mm call site(s) via _scaled_mm_fb (opt-in: VLLM_STRIX_FP8_TRITON=1)")
-    print("Successfully patched vLLM for Strix Halo FP8 kernels (opt-in).")
+    if "_POSSIBLE_FP8_KERNELS" not in txt:
+        sys.exit(f"ERROR: _POSSIBLE_FP8_KERNELS not found in {p}; vLLM layout changed.")
+    p.write_text(txt.rstrip("\n") + "\n" + REGISTRATION)
+    print(f" -> FP8 patch: registration appended to {p}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     patch_fp8()
